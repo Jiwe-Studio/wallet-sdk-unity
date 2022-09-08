@@ -134,9 +134,11 @@ The method can be called at any time as long as it has a trigger.
 
 You have to switch to scripts (using your favorite script editor) to include the method to call the reward function.
 
-The reward acts as a debit to the game wallet which was created on is debited from the developersdeveloper's profile. If the game wallet is at 0 the response will be a error 400: Bad request.If the game wallet is at 0 the response will be an error 429: Bad request on the console log. (Please use the console log on the Unity engine to view and log errors)
+The reward acts as a debit to the developer's wallet and a credit to the player's wallet. 
 
-If this error occurs you can display it on screen for the player to be aware
+If the game wallet is at 0 the response will be an error 429: Bad request on the console log. (Please use the console log on the Unity engine to view and log errors)
+
+If this error occurs the developer can display it on screen for the player.
 
 
 **Adding Purchases:**
@@ -151,7 +153,7 @@ _reward.purchase( 0.1, "ORDER_ID", "Purchasing pigs in a blanket");_
 
 Variables being passed:
 
-- 0.1 - is the amount to be rewarded
+- 0.1 - is the amount to be charged
 - Order_ID - is useful for the dev’s records to know which reward he has given
 - “Purchasing pigs in a blanket" - is a description of the purchase
 

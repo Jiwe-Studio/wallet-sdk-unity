@@ -15,10 +15,10 @@ Content:
 
    1. How authentication works
    2. Generating game wallet ID
-   3. Downloading and importing the JiweOAuth2 SDK
+   3. Downloading and importing the JiweWallet SDK for Unity
    4. Integrating the game wallet ID
 
-3. Adding purchase and reward functionality through the JiweWallet SDK
+3. Adding purchase and reward functionality through the JiweWallet SDK for Unity
 
    1. How the functionality works
    2. Adding rewards
@@ -64,25 +64,29 @@ b)Creating your Jiwe IO wallet and connecting it to your Celo wallet
 
    (For security purposes a unique key is required for each game to be able to validate or invalidate each game individually.)
 
-**B. Download and import the JiweOAuth2 SDK to your game**
+**B. Download and import the JiweWallet SDK to your game**
 
-**Download the JiweOAuth2 SDK here**
+**Download the JiweWallet SDK for Unity from here (Github)**
 
-The JiweOAuth2 Unity SDK allows you to redirect to a web browser page that allows you to log in with your Jiwe IO credentials and receive a token back that will passed to the game to give the user access to the game.
+The JiweWallet SDK for Unity allows you to authenticate players on start by redirecting to a web browser page that allows you to log in with their Jiwe IO credentials and receive a token back that will be passed to the game to give the user access to the game. Using this token the player will be able to recieve and make purchases later.
 
-**_\*If_**_after importing the_**_JiweOAuth2 script_**_and you receive the following_**_error:”newtonsoft namespace is missing”_**_, go to the root SDK folder and traverse into the JSON folder and import the newtonsoft framework package (or download it from_[_www.nuget.org_](http://www.nuget.org)_search for the newtonsoft.json file)_
+**_\*If_**_after followingthe steps below and importing the first _**_JiweOAuth2 script_**_and you receive the following_**_error:”newtonsoft namespace is missing”_**_, go to the root SDK folder and drag and drop the "Newtonsoft.Json.dll" file into your assets folder (or download it from_[_www.nuget.org_](http://www.nuget.org)_search for the newtonsoft.json file)_
 
 - Open your game build in your editor
 
-- Download JiweOAuth2 SDK from developer.jiwe.io/unity(needs hosting)
+- Download JiweWallet SDK for Unity from here (Github)
 
 - Unzip it into a folder
 
-- Switch to your game in the Unity engine and create “JiweWallet” folder in your scripts folder, then import the JiweOAuth2 script into your JiweWallet folder
+- Switch to your game in the Unity engine and create thr “JiweWallet” folder in your scripts folder, then import the JiweOAuth2 and Reward scripts into your JiweWallet folder
+
+- In your Hierarchy module on the top right, create an empty game object and name it JiweSDK and select it
+
+- After selecting it go to your inspector and select add component and add the JiweOAuth2 Script from the scripts folder
 
 - Put the JiweOAuth2 script in a scene game object and configure the settings below using the inspector
 
-  - Select the script and navigate to the inspector and update the configuration details on the inspector with the appropriate links
+  - And update the configuration details on the inspector with the appropriate links
 
     - _Client ID (Generated in your Jiwe profile page)_
     - _API Key (Generated in your Jiwe profile page)_

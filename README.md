@@ -110,19 +110,13 @@ The JiweWallet SDK for Unity allows you to authenticate players on start by redi
 
 ![](https://lh3.googleusercontent.com/nxz3WieVAfGAm-ftFibi9yAX5AP_y1YgH94opxO2PMVmd9lPZXA2Z4e0hzFFs-e_M2ItXbKBdps6hxGuLJYbPMUtuzKNwf35Pi6RrYmZgfBMui_a0xA4lYyVF9JzK5SlPVLJvWnil-sys6R08kegwowMNMJnyM4va120DzuHz4GSqTM_GSZn3AtELQ)
 
-Integrating the JiweWallet SDK, the rewards and purchase method can be called anywhere in the game by integrating the functions below, please make sure you have the correct game wallet id and enough budget for each future transaction.
+Integrating the rewards and purchase functionality which can be called anywhere in the game by integrating the functions below, please make sure you have the correct game wallet id and enough budget for each future transaction.
 
 **a) The rewards and purchase functionality:**
 
-- Open your game build in your editor
-- Download JiweWallet SDK from developer.jiwe.io/unity(needs hosting)
-- Unzip and put the JiweWalletI script in the “JiweWallet” folder with the JiweAuth2 script
+- After downloading and importing the jiweOAuth2 and rewards scripts into your script folder
 
-_(This SDK details how to call the rewards and purchase functionality.)_
-
-**Adding Rewards:**
-
-You can call the reward functionality whenever you want to reward the player for an achievement or doing something desirable within the game.
+You can call the reward or purchase functionality whenever you want to reward or charge the player for an achievement or a loss within the game.
 
 The rewards function is called by using the following method within the game:
 
@@ -136,9 +130,14 @@ Variables being passed:
 - Order_ID - is useful for the dev’s records to know which reward he has given
 - “Reward for passing boss#1” - is a description of the reward
 
-The method can be called at any time as long as it has a trigger. You have to switch to scripts (using your favorite script editor) to include the method to call the reward function.
+The method can be called at any time as long as it has a trigger. 
 
-The reward acts as debit to the game wallet which was created on the developers profile. If the game wallet is at 0 the response will be a error 400: Bad request.
+You have to switch to scripts (using your favorite script editor) to include the method to call the reward function.
+
+The reward acts as a debit to the game wallet which was created on is debited from the developersdeveloper's profile. If the game wallet is at 0 the response will be a error 400: Bad request.If the game wallet is at 0 the response will be an error 429: Bad request on the console log. (Please use the console log on the Unity engine to view and log errors)
+
+If this error occurs you can display it on screen for the player to be aware
+
 
 **Adding Purchases:**
 
@@ -156,9 +155,13 @@ Variables being passed:
 - Order_ID - is useful for the dev’s records to know which reward he has given
 - “Purchasing pigs in a blanket" - is a description of the purchase
 
-The method can be called at any time as long as it has a trigger. You have to switch to scripts (using your favorite script editor) to include the method to call the purchase function.
+The method can be called at any time as long as it has a trigger. 
 
-The purchase acts as debit to the game wallet which was created on the developers profile. If the game wallet is at 0 the response will be a error 400: Bad request.
+You have to switch to scripts (using your favorite script editor) to include the method to call the purchase function.
+
+The purchase acts as debit to the player's wallet and a credit to the developers's wallet. 
+
+If the player's wallet is at 0 the response will be a error 429: Bad request. Which the developer can log and display on screen for the player.
 
 * * *
 

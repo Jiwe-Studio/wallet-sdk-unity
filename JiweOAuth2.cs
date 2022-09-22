@@ -23,7 +23,7 @@ public class JiweOAuth2 : MonoBehaviour
     public string authorizationEndpoint;
     public string tokenEndpoint;
     public string userInfoEndpoint;
-    public boolean testMode;
+    public bool testMode;
     [HideInInspector]
     public string wallet_access_token;
     // Start is called before the first frame update

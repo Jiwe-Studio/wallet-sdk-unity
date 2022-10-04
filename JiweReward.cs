@@ -86,8 +86,7 @@ public class JiweReward : MonoBehaviour
         request.uploadHandler = (UploadHandler)new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = (DownloadHandler)new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        API_KEY = jiwe.testMode ? $"test_{jiwe.apiKey}" : jiwe.apiKey;
-        request.SetRequestHeader("api_key", API_KEY);
+        request.SetRequestHeader("api_key", jiwe.testMode ? $"test_{jiwe.apiKey}" : jiwe.apiKey);
         request.SetRequestHeader("api_secret", jiwe.apiSecret);
         request.SetRequestHeader("Authorization", "Bearer " + jiwe.wallet_access_token);
         Debug.Log(jiwe.apiKey);
@@ -95,6 +94,8 @@ public class JiweReward : MonoBehaviour
         Debug.Log(jiwe.wallet_access_token);
         yield return request.SendWebRequest();
         Debug.Log("Status Code: " + request.responseCode);
+        Debug.Log("Response: " + request.result);
+        
     }
 
 }

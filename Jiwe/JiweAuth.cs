@@ -10,11 +10,16 @@ namespace Jiwe
 {
     /// <summary>
     /// Player login for the Jiwe Wallet (OAuth2 Authorization Code + PKCE).
+    /// This produces the id_token that JiweWallet needs (as X-API-TOKEN) for
+    /// reward calls — it does NOT carry the X-API-USERNAME/X-API-KEY wallet
+    /// credentials, since those are static per-app values used on every
+    /// wallet call (including ones that don't need a logged-in player, like
+    /// the leaderboard) — see JiweWallet for those.
     ///
     /// Endpoints are fixed per Jiwe's own docs (id.jiwe.io) and no longer need
-    /// to be typed into the Inspector per project. Only your app's own
+    /// to be typed into the Inspector per project. Only your OAuth client
     /// credentials (from your Jiwe profile > Apps) are required:
-    ///   - clientId, apiKey, apiSecret, gameId
+    ///   - clientId, apiSecret (used as the token endpoint's client_secret)
     ///
     /// The redirect flow is different per platform (this is the one part of
     /// login that genuinely can't be unified — each platform requires a
@@ -38,12 +43,9 @@ namespace Jiwe
         private const string UserInfoEndpoint = "https://id.jiwe.io/me";
         private const string Scope = "openid profile in-app-purchases rewards";
 
-        [Header("Your Jiwe app credentials (Jiwe profile > Apps)")]
+        [Header("Your Jiwe OAuth client credentials (Jiwe profile > Apps)")]
         public string clientId;
-        public string apiKey;
-        public string apiSecret;
-        public string gameId;
-        public bool testMode;
+        public string apiSecret; // sent as the token endpoint's client_secret
 
         [Header("Android/iOS only — must be registered with Jiwe as a redirect_uri")]
         public string mobileRedirectScheme = "jiwewallet";

@@ -70,10 +70,10 @@ Copy the `Jiwe/` folder (`JiweAuth.cs` + `JiweWallet.cs`) into your project's `A
 
 - In your Hierarchy, create an empty GameObject (e.g. "JiweSDK") and add both the **JiweAuth** and **JiweWallet** components to it
 - On **JiweWallet**, drag the same GameObject's **JiweAuth** component into the `auth` field
-- On **JiweAuth**, fill in your app credentials from your Jiwe profile page:
-  - `clientId`, `apiKey`, `apiSecret`, `gameId`
-  - `testMode` — check this while testing against Jiwe's sandbox
-  - `mobileRedirectScheme` — **Android/iOS builds only**; a custom URI scheme (e.g. `yourgame`) that you must also register with Jiwe as an allowed redirect URI. Not used on Standalone or WebGL.
+- Fill in your credentials from your Jiwe profile page — note these are **two separate credential pairs**, not one:
+  - On **JiweAuth** (OAuth login): `clientId`, `apiSecret` (sent as the token endpoint's `client_secret`)
+  - On **JiweWallet** (wallet API calls): `apiUsername`, `apiKey` — sent as `X-API-USERNAME`/`X-API-KEY` on every wallet call. These are static per-app and don't require a player to be logged in, which is why leaderboard/wallet-balance/transaction-status calls work even before login.
+  - `mobileRedirectScheme` (on JiweAuth) — **Android/iOS builds only**; a custom URI scheme (e.g. `yourgame`) that you must also register with Jiwe as an allowed redirect URI. Not used on Standalone or WebGL.
 
 **The login redirect itself works differently per platform** (this is inherent to how each platform's browser integration works, not a config choice):
 
@@ -90,50 +90,61 @@ Leave `loginOnStart` checked (default) to log in automatically when the scene lo
 
 * * *
 
-**3. Adding purchase and reward functionality through the JiweWallet SDK**
+**3. Adding reward, leaderboard, and wallet functionality through the JiweWallet SDK**
 
-**3a. How the reward and purchase functionality works:**
+**3a. How it works:**
 
 ![](https://lh3.googleusercontent.com/nxz3WieVAfGAm-ftFibi9yAX5AP_y1YgH94opxO2PMVmd9lPZXA2Z4e0hzFFs-e_M2ItXbKBdps6hxGuLJYbPMUtuzKNwf35Pi6RrYmZgfBMui_a0xA4lYyVF9JzK5SlPVLJvWnil-sys6R08kegwowMNMJnyM4va120DzuHz4GSqTM_GSZn3AtELQ)
 
-Call these from anywhere in the game once `JiweAuth.IsLoggedIn` is true. Make sure you have the correct game wallet id and enough budget for each future transaction.
+Reward calls (XP, points, airtime) credit the logged-in player and require `JiweAuth.IsLoggedIn` to be true first. Leaderboard, wallet balance, and transaction status are scoped to your app rather than a player, so they work any time — no login needed.
 
-**a) Rewards:**
+> **There is no "purchase" (charge-the-player) call.** The previous SDK's `Purchase()` doesn't correspond to anything in the current Jiwe Wallet API and has been removed rather than left pointing at a stale host. If Jiwe adds a player-purchase endpoint later, it can be added to `JiweWallet.cs` following the same pattern as the reward methods below.
+
+**a) XP reward** — for progress/skill milestones; XP has no monetary value in Jiwe:
 
 ```csharp
-jiweWallet.RewardPlayer(0.1, "ORDER_ID", "Reward for passing boss#1", result => {
-    if (result.Success) Debug.Log("Reward sent!");
-    else Debug.LogWarning($"Reward failed: {result.Error}");
+jiweWallet.GiveXpReward(20, "Reward for passing boss#1", result => {
+    if (result.Success) Debug.Log("XP awarded!");
+    else Debug.LogWarning($"XP reward failed: {result.Error}");
 });
 ```
 
-![](https://lh4.googleusercontent.com/_wKPE6vQFGV9kkgGOHOAh-qOipbsQd6UWgt1YMJ5Da4Zf9Y7XvbOzaBGwyBVrUJqMQROGWNkaneiH68pmlHhI73Wk2HbixOpfgQv3_gDTAaGfb1w41REY-RM_PNY0udoYc0SWLPScPKqHetiI6DKFKXDGukVIP2qSoR0VHLvCnyUnfXkmyTCPcvQxg)
-
-Arguments:
-
-- `0.1` — the amount to be rewarded
-- `"ORDER_ID"` — useful for your own records to know which reward you gave
-- `"Reward for passing boss#1"` — a description of the reward
-- the callback (optional) — receives a `JiweWalletResult` with `Success`, `Error`, and the raw response body, instead of only a `Debug.Log` you have to go find in the console
-
-The reward acts as a debit to the developer's wallet and a credit to the player's wallet.
-
-If the game wallet is at 0, `result.Success` will be `false` with the HTTP status in `result.Error` (previously: only visible as a 429 in the console log) — check `result.Success` in your callback to show this to the player instead of digging through logs.
-
-**b) Purchases:**
+**b) Points (Cowrie) reward** — Jiwe's monetary in-game currency:
 
 ```csharp
-jiweWallet.Purchase(0.1, "ORDER_ID", "Purchasing pigs in a blanket", result => {
-    if (result.Success) Debug.Log("Purchase complete!");
-    else Debug.LogWarning($"Purchase failed: {result.Error}");
+jiweWallet.GivePointsReward(20, "Reward for passing boss#1", result => { /* same result shape */ });
+```
+
+**c) Airtime reward** — credits real phone airtime to a recipient number, at least 5 units:
+
+```csharp
+jiweWallet.GiveAirtimeReward(20, "254722334455", "Weekly top-grinder payout", result => { /* same result shape */ });
+```
+
+All three take an optional `transactionId` (auto-generated if omitted) and return a `JiweWalletResult` (`Success`, `Error`, `RawResponse`) in the callback — check `result.Success` to show failures (e.g. reward amount below the API's minimum, or your app's wallet at 0) to the player instead of only reading the console log.
+
+**d) Leaderboard:**
+
+```csharp
+jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking: "highest", result => {
+    if (result.Success) foreach (var e in result.Entries) Debug.Log($"{e.rank}. {e.name} — {e.currentXP}");
+});
+```
+`rewardType` is `"xp"` or `"cowrie"`; `period` is `"day"`/`"week"`/`"month"`/`"year"`, or `null` for all-time.
+
+**e) Wallet balance** (your app's own Jiwe wallet, not a player's):
+
+```csharp
+jiweWallet.GetWalletBalance(result => {
+    if (result.Success) Debug.Log($"Available: {result.Available}");
 });
 ```
 
-![](https://lh4.googleusercontent.com/_wKPE6vQFGV9kkgGOHOAh-qOipbsQd6UWgt1YMJ5Da4Zf9Y7XvbOzaBGwyBVrUJqMQROGWNkaneiH68pmlHhI73Wk2HbixOpfgQv3_gDTAaGfb1w41REY-RM_PNY0udoYc0SWLPScPKqHetiI6DKFKXDGukVIP2qSoR0VHLvCnyUnfXkmyTCPcvQxg)
+**f) Transaction status** — check any `ledger_transaction_id` returned by the calls above:
 
-Same arguments as `RewardPlayer`, but this debits the player's wallet and credits the developer's. If the player's wallet is at 0, `result.Success` is `false` — same pattern, check it in your callback rather than only logging.
-
-> **Note:** these calls hit `bursment.jiwe.io`, a different host from the wallet API described in some newer Jiwe docs (`abacus.jiwe.io`) that use a different auth header scheme (`X-API-USERNAME`/`X-API-KEY`/`X-API-TOKEN` instead of `api_key`/`api_secret`/`Authorization`). If you're integrating both, confirm with the Jiwe team which one is current for reward/purchase calls — this SDK targets `bursment.jiwe.io` as that's what the original SDK used.
+```csharp
+jiweWallet.GetTransactionStatus(transactionId, result => Debug.Log(result.RawResponse));
+```
 
 * * *
 

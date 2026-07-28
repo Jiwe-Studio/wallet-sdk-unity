@@ -78,7 +78,12 @@ namespace Jiwe
         private string _codeVerifier;
         private string _state;
         private System.Net.HttpListener _activeListener; // set only while the Standalone/Editor loopback path is waiting — lets Cancel() unblock it
+        private bool _awaitingDeepLink; // set only while the Android/iOS deep-link path is waiting — same role as _activeListener above, but there's no object to Stop(); HandleDeepLink checks this instead
         private bool _cancelled;
+        private bool _loginInProgress; // re-entrancy guard — calling Login() again while one is already waiting on a redirect would start a second loopback listener/deep-link wait on top of the first, leaking state instead of replacing it
+
+        /// <summary>True from the moment Login() is called until it succeeds, fails, or is cancelled. Not required to use the SDK, but useful if your own UI wants to disable a "Log In" button (while still keeping Skip/Cancel live — see Cancel()) rather than relying on this SDK to silently ignore a double-tap.</summary>
+        public bool IsLoggingIn => _loginInProgress;
 
         private const string WebGlVerifierKey = "jiwe_pkce_verifier";
         private const string WebGlStateKey = "jiwe_pkce_state";
@@ -108,12 +113,25 @@ namespace Jiwe
         public void Cancel()
         {
             _cancelled = true;
+            _loginInProgress = false;
+            _awaitingDeepLink = false; // see HandleDeepLink — a redirect that arrives after this point is treated as stale, not completed
             try { _activeListener?.Stop(); _activeListener?.Close(); } catch { /* already stopped/disposed — fine */ }
         }
 
-        /// <summary>Starts (or restarts) the login flow. Safe to call from a "Log in" button instead of relying on loginOnStart.</summary>
+        /// <summary>
+        /// Starts (or restarts) the login flow. Safe to call from a "Log in" button instead of relying on
+        /// loginOnStart. Ignored (with a warning) if a login is already in progress — call Cancel() first
+        /// if you want to restart rather than let this silently start a second, competing wait.
+        /// </summary>
         public void Login()
         {
+            if (_loginInProgress)
+            {
+                Debug.LogWarning("[JiweAuth] Login() called while one is already in progress — ignored. Call Cancel() first to restart.");
+                return;
+            }
+
+            _loginInProgress = true;
             _cancelled = false;
             _codeVerifier = RandomUrlSafe(32);
             _state = RandomUrlSafe(16);
@@ -230,11 +248,20 @@ namespace Jiwe
         private void LoginViaDeepLink(string codeChallenge)
         {
             _pendingRedirectUri = $"{mobileRedirectScheme}://oauth-callback";
+            _awaitingDeepLink = true;
             Application.OpenURL(BuildAuthUrl(_pendingRedirectUri, codeChallenge));
         }
 
         private async void HandleDeepLink(string url)
         {
+            // GREY AREA FIXED: this used to process ANY deep link that arrived, even one that showed up
+            // after Cancel() — so a player who tapped Skip, assumed they'd moved on, and had the OS bring
+            // the app back to the foreground later (a slow/delayed redirect is a real possibility, not just
+            // theoretical) would silently get logged in anyway, well after their own UI had moved past the
+            // login screen. Now a stale/late redirect is explicitly ignored.
+            if (!_awaitingDeepLink) return;
+            _awaitingDeepLink = false;
+
             var query = ParseQuery(url);
             query.TryGetValue("error", out string error);
             query.TryGetValue("code", out string code);
@@ -271,6 +298,11 @@ namespace Jiwe
             var query = ParseQuery(Application.absoluteURL);
             if (!query.ContainsKey("code") && !query.ContainsKey("error")) return false;
 
+            // This is a fresh page load (a new script instance after the full-page redirect), so
+            // IsLoggingIn would otherwise incorrectly read false here even while the exchange below is
+            // genuinely in flight — this path never goes through Login(), which is the only other place
+            // that sets it.
+            _loginInProgress = true;
             _codeVerifier = PlayerPrefs.GetString(WebGlVerifierKey, "");
             _state = PlayerPrefs.GetString(WebGlStateKey, "");
             PlayerPrefs.DeleteKey(WebGlVerifierKey);
@@ -366,6 +398,7 @@ namespace Jiwe
 
             IdToken = token.id_token;
             await FetchUserInfo(token.access_token);
+            _loginInProgress = false;
             OnLoginSuccess?.Invoke();
         }
 
@@ -383,6 +416,10 @@ namespace Jiwe
 
         private void Fail(string message)
         {
+            _loginInProgress = false;
+            // OAuth/server error bodies can occasionally be a full HTML error page (e.g. a proxy/firewall
+            // block) rather than JSON — cap length so that never turns into a wall of text in a UI label.
+            if (message.Length > 300) message = message.Substring(0, 300) + "…";
             Debug.LogWarning($"[JiweAuth] {message}");
             OnLoginFailed?.Invoke(message);
         }

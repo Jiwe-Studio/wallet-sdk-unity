@@ -29,7 +29,13 @@ namespace Jiwe
     public class JiweWallet : MonoBehaviour
     {
         private const string BaseUrl = "https://abacus.jiwe.io/rest/api/v1";
-        private const int NetworkTimeoutSeconds = 20; // UnityWebRequest's own built-in timeout — no cancel button needed here since these are one-shot fire-and-forget calls, not a blocking login screen (contrast JiweAuth.WaitBounded, which also supports an explicit Cancel())
+        // UnityWebRequest's own built-in timeout — no cancel button needed here since these are one-shot
+        // fire-and-forget calls, not a blocking login screen (contrast JiweAuth.networkTimeoutSeconds,
+        // which backs a manually-polled wait specifically so JiweAuth.Cancel() can also interrupt it).
+        // Deliberately a SEPARATE constant from JiweAuth's, not shared — the two components have no
+        // reason to be coupled, and 20s for both is a coincidence of picking the same reasonable default,
+        // not a shared setting. Adjust independently if one class of call needs a different bound.
+        private const int NetworkTimeoutSeconds = 20;
 
         [Header("Your Jiwe wallet API credentials (Jiwe profile > Apps)")]
         public string apiUsername;
@@ -92,14 +98,23 @@ namespace Jiwe
         }
 
         /// <summary>
-        /// Checks whether THIS BUILD's own apiUsername/apiKey are still accepted by Jiwe — the mechanism
-        /// behind a deliberate forced-update flow: rotate these keys server-side, and every build still
-        /// holding the old ones can detect it next launch and prompt players to update, rather than
-        /// silently failing every wallet call with no explanation. onResult gets `false` ONLY on a
-        /// definitive 401/403 (credentials actively rejected); everything else (network blip, timeout,
-        /// 5xx) reports `true`, so a transient outage is never mistaken for "this build is stale" — that
-        /// distinction matters, an over-eager forced-update prompt is worse than not having one.
-        /// Call this once at startup and gate your own "update required" UI on the result.
+        /// Checks whether THIS BUILD's own apiUsername/apiKey (the WALLET credentials on this component)
+        /// are still accepted by Jiwe — the mechanism behind a deliberate forced-update flow: rotate these
+        /// keys server-side, and every build still holding the old ones can detect it next launch and
+        /// prompt players to update, rather than silently failing every wallet call with no explanation.
+        /// onResult gets `false` ONLY on a definitive 401/403 (credentials actively rejected); everything
+        /// else (network blip, timeout, 5xx) reports `true`, so a transient outage is never mistaken for
+        /// "this build is stale" — that distinction matters, an over-eager forced-update prompt is worse
+        /// than not having one. Call this once at startup and gate your own "update required" UI on the
+        /// result.
+        ///
+        /// SCOPE: this only validates the wallet API pair (apiUsername/apiKey on THIS component) — it does
+        /// NOT validate JiweAuth's separate OAuth pair (clientId/apiSecret). The two are independent
+        /// credentials against different endpoints; rotating one doesn't invalidate the other, and there's
+        /// no equivalent lightweight check for the OAuth pair (validating it means actually running a
+        /// login). If you rotate both together for a forced update, this only confirms the wallet half —
+        /// an invalid OAuth secret would instead surface later as a real login failure via
+        /// JiweAuth.OnLoginFailed, not from this method.
         /// </summary>
         public void CheckCredentialsValid(Action<bool> onResult)
         {

@@ -55,7 +55,7 @@ b)Creating your Jiwe IO wallet and connecting it to your Celo wallet
 ****Steps:**
 
 1. Generating game wallet ID API key (Each game requires a unique wallet ID)
-2. Downloading and importing the JiweOAuth2 SDK and integrating the game wallet ID
+2. Downloading and importing the `Jiwe/` folder and configuring your app credentials
 
 1. **Generating the game wallet ID**
 
@@ -66,104 +66,85 @@ b)Creating your Jiwe IO wallet and connecting it to your Celo wallet
 
 **B. Download and import the JiweWallet SDK to your game**
 
-**Download the JiweWallet SDK for Unity from here (Github)**
+Copy the `Jiwe/` folder (`JiweAuth.cs` + `JiweWallet.cs`) into your project's `Assets/` — that's the whole SDK now. No extra DLLs to import: the endpoint URLs (`id.jiwe.io/auth`, `/token`, `/me`) are built in, and there's no Newtonsoft.Json dependency to drag in separately (the SDK uses Unity's own `JsonUtility`).
 
-The JiweWallet SDK for Unity allows you to authenticate players on start by redirecting to a web browser page that allows you to log in with their Jiwe IO credentials and receive a token back that will be passed to the game to give the user access to the game. Using this token the player will be able to recieve and make purchases later.
+- In your Hierarchy, create an empty GameObject (e.g. "JiweSDK") and add both the **JiweAuth** and **JiweWallet** components to it
+- On **JiweWallet**, drag the same GameObject's **JiweAuth** component into the `auth` field
+- Fill in your credentials from your Jiwe profile page — note these are **two separate credential pairs**, not one:
+  - On **JiweAuth** (OAuth login): `clientId`, `apiSecret` (sent as the token endpoint's `client_secret`)
+  - On **JiweWallet** (wallet API calls): `apiUsername`, `apiKey` — sent as `X-API-USERNAME`/`X-API-KEY` on every wallet call. These are static per-app and don't require a player to be logged in, which is why leaderboard/wallet-balance/transaction-status calls work even before login.
+  - `mobileRedirectScheme` (on JiweAuth) — **Android/iOS builds only**; a custom URI scheme (e.g. `yourgame`) that you must also register with Jiwe as an allowed redirect URI. Not used on Standalone or WebGL.
 
-**_\*If_**_after followingthe steps below and importing the first _**_JiweOAuth2 script_**_and you receive the following_**_error:”newtonsoft namespace is missing”_**_, go to the root SDK folder and drag and drop the "Newtonsoft.Json.dll" file into your assets folder (or download it from_[_www.nuget.org_](http://www.nuget.org)_search for the newtonsoft.json file)_
+**The login redirect itself works differently per platform** (this is inherent to how each platform's browser integration works, not a config choice):
 
-- Open your game build in your editor
+| Platform | How the redirect gets back to your game |
+|---|---|
+| Standalone / Editor | A local loopback HTTP server catches the browser's redirect automatically — no extra setup. |
+| Android / iOS | The system browser redirects to your custom URI scheme, which reopens the app. Requires registering that redirect URI with Jiwe first. |
+| WebGL | Jiwe's login page redirects back to your **same hosted game URL** with the auth code attached; the page reloads and the SDK resumes automatically. **Your Jiwe app must allow CORS from your hosted domain**, since the token exchange happens as a browser-side request — ask Jiwe to whitelist your domain if this fails with a CORS error in the browser console. |
 
-- Download JiweWallet SDK for Unity from here (Github)
+Leave `loginOnStart` checked (default) to log in automatically when the scene loads, or uncheck it and call `jiweAuth.Login()` yourself (e.g. from a "Log in with Jiwe" button) if you'd rather not block on login before showing any menu.
 
-- Unzip it into a folder
-
-- Switch to your game in the Unity engine and create thr “JiweWallet” folder in your scripts folder, then import the JiweOAuth2 and Reward scripts into your JiweWallet folder
-
-- In your Hierarchy module on the top right, create an empty game object and name it JiweSDK and select it
-
-- After selecting it go to your inspector and select add component and add the JiweOAuth2 Script from the scripts folder
-
-- Put the JiweOAuth2 script in a scene game object and configure the settings below using the inspector
-
-  - And update the configuration details on the inspector with the appropriate links
-
-    - _Client ID (Generated in your Jiwe profile page)_
-    - _API Key (Generated in your Jiwe profile page)_
-    - _App Secret (Generated in your Jiwe profile page)_
-    - _GameID(Your game name)_
-    - _<https://id.jiwe.io/auth>_
-    - _<https://id.jiwe.io/token>_
-    - _<https://id.jiwe.io/me>_
-
-![](https://lh6.googleusercontent.com/HWLENVEwyMjBRuUdcbnfmWtpVJp_Nolg5ARH6W1xGs7dgMIQammJVKd0KLMxH1PEYv7dH18RmmIx6KYojipDRxPEVtnaYpRGhOIljY3thIn1HcesunL-43yrtxzVkvyJc6IzcdF_XXZZDo9B0xTuYeitRpRP-_1wGuu_0s-2kOEVNpDA3rDNAXNqBQ)
-
-1. Test the functionality by running the game build, which should open a popup web browser first thing the game starts and allow you to login via your Jiwe IO credentials, and then redirect you back to the game.
-2. IF the login is successful the game will start and if the login fails you will not get the access token and will get an error message on your browser.
-3. The SDK is configured such that if you do not get a token the game will not start.
+1. Test by running the game (or a WebGL/Android build) — it should open the Jiwe login page, and once you log in, `JiweAuth.OnLoginSuccess` fires and `jiweAuth.IsLoggedIn` becomes true.
+2. If login fails, `JiweAuth.OnLoginFailed` fires with a message (also logged as a `Debug.LogWarning`) — nothing else in the SDK force-stops your game, so how you gate gameplay on login is up to you.
 
 * * *
 
-**3. Adding purchase and reward functionality through the JiweWallet SDK**
+**3. Adding reward, leaderboard, and wallet functionality through the JiweWallet SDK**
 
-**3a. How the reward and purchase functionality works:**
+**3a. How it works:**
 
 ![](https://lh3.googleusercontent.com/nxz3WieVAfGAm-ftFibi9yAX5AP_y1YgH94opxO2PMVmd9lPZXA2Z4e0hzFFs-e_M2ItXbKBdps6hxGuLJYbPMUtuzKNwf35Pi6RrYmZgfBMui_a0xA4lYyVF9JzK5SlPVLJvWnil-sys6R08kegwowMNMJnyM4va120DzuHz4GSqTM_GSZn3AtELQ)
 
-Integrating the rewards and purchase functionality which can be called anywhere in the game by integrating the functions below, please make sure you have the correct game wallet id and enough budget for each future transaction.
+Reward calls (XP, points, airtime) credit the logged-in player and require `JiweAuth.IsLoggedIn` to be true first. Leaderboard, wallet balance, and transaction status are scoped to your app rather than a player, so they work any time — no login needed.
 
-**a) The rewards and purchase functionality:**
+> **There is no "purchase" (charge-the-player) call.** The previous SDK's `Purchase()` doesn't correspond to anything in the current Jiwe Wallet API and has been removed rather than left pointing at a stale host. If Jiwe adds a player-purchase endpoint later, it can be added to `JiweWallet.cs` following the same pattern as the reward methods below.
 
-- After downloading and importing the jiweOAuth2 and rewards scripts into your script folder
+**a) XP reward** — for progress/skill milestones; XP has no monetary value in Jiwe:
 
-You can call the reward or purchase functionality whenever you want to reward or charge the player for an achievement or a loss within the game.
+```csharp
+jiweWallet.GiveXpReward(20, "Reward for passing boss#1", result => {
+    if (result.Success) Debug.Log("XP awarded!");
+    else Debug.LogWarning($"XP reward failed: {result.Error}");
+});
+```
 
-The rewards function is called by using the following method within the game:
+**b) Points (Cowrie) reward** — Jiwe's monetary in-game currency:
 
-_reward.RewardPlayer( 0.1, "ORDER_ID", "Reward for passing boss#1");_
+```csharp
+jiweWallet.GivePointsReward(20, "Reward for passing boss#1", result => { /* same result shape */ });
+```
 
-![](https://lh4.googleusercontent.com/_wKPE6vQFGV9kkgGOHOAh-qOipbsQd6UWgt1YMJ5Da4Zf9Y7XvbOzaBGwyBVrUJqMQROGWNkaneiH68pmlHhI73Wk2HbixOpfgQv3_gDTAaGfb1w41REY-RM_PNY0udoYc0SWLPScPKqHetiI6DKFKXDGukVIP2qSoR0VHLvCnyUnfXkmyTCPcvQxg)
+**c) Airtime reward** — credits real phone airtime to a recipient number, at least 5 units:
 
-Variables being passed:
+```csharp
+jiweWallet.GiveAirtimeReward(20, "254722334455", "Weekly top-grinder payout", result => { /* same result shape */ });
+```
 
-- 0.1 - is the amount to be rewarded
-- Order_ID - is useful for the dev’s records to know which reward he has given
-- “Reward for passing boss#1” - is a description of the reward
+All three take an optional `transactionId` (auto-generated if omitted) and return a `JiweWalletResult` (`Success`, `Error`, `RawResponse`) in the callback — check `result.Success` to show failures (e.g. reward amount below the API's minimum, or your app's wallet at 0) to the player instead of only reading the console log.
 
-The method can be called at any time as long as it has a trigger. 
+**d) Leaderboard:**
 
-You have to switch to scripts (using your favorite script editor) to include the method to call the reward function.
+```csharp
+jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking: "highest", result => {
+    if (result.Success) foreach (var e in result.Entries) Debug.Log($"{e.rank}. {e.name} — {e.currentXP}");
+});
+```
+`rewardType` is `"xp"` or `"cowrie"`; `period` is `"day"`/`"week"`/`"month"`/`"year"`, or `null` for all-time.
 
-The reward acts as a debit to the developer's wallet and a credit to the player's wallet. 
+**e) Wallet balance** (your app's own Jiwe wallet, not a player's):
 
-If the game wallet is at 0 the response will be an error 429: Bad request on the console log. (Please use the console log on the Unity engine to view and log errors)
+```csharp
+jiweWallet.GetWalletBalance(result => {
+    if (result.Success) Debug.Log($"Available: {result.Available}");
+});
+```
 
-If this error occurs the developer can display it on screen for the player.
+**f) Transaction status** — check any `ledger_transaction_id` returned by the calls above:
 
-
-**Adding Purchases:**
-
-Similar to the rewards function, you can call the purchase functionality whenever you want the gamer to pay or purchase something from the game.
-
-The purchase function is called by using the following method within the game:
-
-_reward.purchase( 0.1, "ORDER_ID", "Purchasing pigs in a blanket");_
-
-![](https://lh4.googleusercontent.com/_wKPE6vQFGV9kkgGOHOAh-qOipbsQd6UWgt1YMJ5Da4Zf9Y7XvbOzaBGwyBVrUJqMQROGWNkaneiH68pmlHhI73Wk2HbixOpfgQv3_gDTAaGfb1w41REY-RM_PNY0udoYc0SWLPScPKqHetiI6DKFKXDGukVIP2qSoR0VHLvCnyUnfXkmyTCPcvQxg)
-
-Variables being passed:
-
-- 0.1 - is the amount to be charged
-- Order_ID - is useful for the dev’s records to know which reward he has given
-- “Purchasing pigs in a blanket" - is a description of the purchase
-
-The method can be called at any time as long as it has a trigger. 
-
-You have to switch to scripts (using your favorite script editor) to include the method to call the purchase function.
-
-The purchase acts as debit to the player's wallet and a credit to the developers's wallet. 
-
-If the player's wallet is at 0 the response will be a error 429: Bad request. Which the developer can log and display on screen for the player.
+```csharp
+jiweWallet.GetTransactionStatus(transactionId, result => Debug.Log(result.RawResponse));
+```
 
 * * *
 

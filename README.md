@@ -23,6 +23,18 @@
 >    and throws silently inside async code.** Already fixed in this SDK's loopback path (see the comment
 >    in `LoginViaLoopback`) — if you ever touch that method, keep `Stop()` AFTER the browser response is
 >    sent, not in a `finally` right after the redirect is caught.
+> 6. **Before letting a player tap a reward/airtime claim button, re-check `JiweWallet.GetBalance()` and
+>    compare `Available` against the claim amount — don't only rely on Jiwe's own rejection.** A pool
+>    figure shown earlier on a different screen (e.g. a main menu) can be stale by the time the player
+>    actually claims. `JiweWalletBalanceResult` already carries `Success`/`Available` for exactly this;
+>    a consumer game shipped without this check and surfaced Jiwe's raw "Account balance is insufficient"
+>    error instead of a clear "pool is low, try later" message — the fix is a few lines in the caller, not
+>    in this SDK, but easy to miss if you don't know to do it.
+> 7. **If credentials copied from the Jiwe dashboard behave unexpectedly** (auth fails despite matching
+>    values, or a top-up doesn't seem to reflect), don't assume your code is wrong first — Jiwe support has
+>    confirmed at least one case where the dashboard's "API Secret" column displayed the wrong value paired
+>    to an API Key. Recopy the credentials and confirm which account is actually configured before you go
+>    debugging the integration.
 
 The Jiwe Wallet API is designed to allow you to authenticate players and allow them to receive rewards and make purchases on their accounts.
 

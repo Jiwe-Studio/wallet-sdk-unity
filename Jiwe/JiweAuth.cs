@@ -45,7 +45,16 @@ namespace Jiwe
 
         [Header("Your Jiwe OAuth client credentials (Jiwe profile > Apps)")]
         public string clientId;
-        public string apiSecret; // sent as the token endpoint's client_secret
+        // Sent as the token endpoint's client_secret, in the POST BODY (not an Authorization: Basic
+        // header) — confirmed by testing that Jiwe's real token endpoint requires this on EVERY platform,
+        // including a pure PKCE mobile/deep-link flow. That's not textbook OAuth-spec "public client"
+        // behavior (PKCE exists specifically so a public/native client doesn't need a secret at all), but
+        // it's what their server actually expects — omitting it fails with a 401 invalid_client on mobile,
+        // confirmed live. Don't "fix" this away for security purity without re-confirming against a real
+        // token exchange first. This does mean the secret ships inside your compiled build (Android APK,
+        // WebGL bundle) — accept that tradeoff deliberately, and see the README for how to keep it out of
+        // source control at least (a gitignored local config asset, not a hardcoded value here).
+        public string apiSecret;
 
         [Header("Android/iOS only — must be registered with Jiwe as a redirect_uri")]
         public string mobileRedirectScheme = "jiwewallet";
@@ -62,8 +71,14 @@ namespace Jiwe
         public event Action OnLoginSuccess;
         public event Action<string> OnLoginFailed;
 
+        [Header("Network safety")]
+        [Tooltip("A hung browser/redirect or a slow token exchange previously had NO way out at all — this bounds every network wait in the login flow so it always eventually fails visibly instead of hanging forever. See Cancel().")]
+        public float networkTimeoutSeconds = 20f;
+
         private string _codeVerifier;
         private string _state;
+        private System.Net.HttpListener _activeListener; // set only while the Standalone/Editor loopback path is waiting — lets Cancel() unblock it
+        private bool _cancelled;
 
         private const string WebGlVerifierKey = "jiwe_pkce_verifier";
         private const string WebGlStateKey = "jiwe_pkce_state";
@@ -82,9 +97,24 @@ namespace Jiwe
         private void OnDisable() => Application.deepLinkActivated -= HandleDeepLink;
 #endif
 
+        /// <summary>
+        /// Escape hatch for a login that never comes back — a hung browser, a dropped redirect, or a slow
+        /// server all previously had NO way out short of restarting the app. Always give the player a
+        /// "Skip"/"Cancel" button that stays clickable and calls this the entire time login is in
+        /// progress, not just before it starts (a login screen that disables its OWN escape route while
+        /// waiting is the single most costly mistake found building with this SDK — see the README).
+        /// Safe to call even if no login is in progress.
+        /// </summary>
+        public void Cancel()
+        {
+            _cancelled = true;
+            try { _activeListener?.Stop(); _activeListener?.Close(); } catch { /* already stopped/disposed — fine */ }
+        }
+
         /// <summary>Starts (or restarts) the login flow. Safe to call from a "Log in" button instead of relying on loginOnStart.</summary>
         public void Login()
         {
+            _cancelled = false;
             _codeVerifier = RandomUrlSafe(32);
             _state = RandomUrlSafe(16);
             string codeChallenge = Base64UrlEncode(Sha256(_codeVerifier));
@@ -118,21 +148,50 @@ namespace Jiwe
             string redirectUri = $"http://127.0.0.1:{port}/";
             listener.Prefixes.Add(redirectUri);
             listener.Start();
+            _activeListener = listener;
 
             Application.OpenURL(BuildAuthUrl(redirectUri, codeChallenge));
 
             System.Net.HttpListenerContext context;
             try
             {
-                context = await listener.GetContextAsync();
+                // No inherent timeout on GetContextAsync() itself — a browser that never redirects back
+                // (closed, backgrounded, network dropped) would hang here forever with no escape besides
+                // Cancel(). Racing it against a delay task bounds it the same way every other network wait
+                // in this SDK is bounded.
+                var contextTask = listener.GetContextAsync();
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(networkTimeoutSeconds));
+                if (await Task.WhenAny(contextTask, timeoutTask) == timeoutTask)
+                {
+                    Fail(_cancelled ? "Login cancelled." : "Timed out waiting for the browser redirect.");
+                    return;
+                }
+                context = await contextTask;
+            }
+            catch (Exception e)
+            {
+                // Reachable via Cancel() stopping/closing the listener out from under this await.
+                Fail(_cancelled ? "Login cancelled." : $"Local login listener failed: {e.Message}");
+                return;
             }
             finally
             {
-                listener.Stop();
+                // Deliberately NOT stopping the listener here — see the ROOT CAUSE note below. It only
+                // gets stopped after the response is fully written, later in this method.
+                _activeListener = null;
             }
 
             var query = context.Request.QueryString;
+            // ROOT CAUSE (found the hard way): this used to call listener.Stop() in the finally block
+            // above, immediately after GetContextAsync() returned — before the response below was ever
+            // written. Stop() disposes any still-open HttpListenerResponse for that listener, so it raced
+            // RespondToBrowser() below: sometimes the browser got its "Login complete" page before Stop()
+            // won the race, sometimes Stop() won first and writing the response threw
+            // ObjectDisposedException — silently, inside a fire-and-forget async method, which is exactly
+            // why this could sit there looking hung with zero console output. Listener now only stops
+            // AFTER the response is fully written and closed, a few lines down.
             await RespondToBrowser(context);
+            listener.Stop();
 
             if (!ValidateRedirect(query["error"], query["code"], query["state"], out string code, out string error))
             {
@@ -267,11 +326,33 @@ namespace Jiwe
             };
 
             using var req = UnityWebRequest.Post(TokenEndpoint, form);
-            var op = req.SendWebRequest();
-            while (!op.isDone) await Task.Yield();
+            if (!await WaitBounded(req)) { Fail(_cancelled ? "Login cancelled." : "Token exchange timed out — no response from Jiwe."); return; }
 
             if (req.result != UnityWebRequest.Result.Success)
             {
+                // req.error alone is just the raw HTTP status line (e.g. "HTTP/1.1 401 Unauthorized") — no
+                // indication of why. OAuth token endpoints almost always return a JSON error body
+                // ({error, error_description}) even on a 4xx; surface that instead whenever present. Found
+                // the hard way: this was the only thing that made a real invalid_client failure
+                // diagnosable at all (it turned out Jiwe's token endpoint requires client_secret in the
+                // body — see the field comment on apiSecret above — omitting it fails exactly like this).
+                string detail = req.downloadHandler?.text;
+                if (!string.IsNullOrEmpty(detail))
+                {
+                    try
+                    {
+                        var oauthError = JsonUtility.FromJson<OAuthErrorResponse>(detail);
+                        if (!string.IsNullOrEmpty(oauthError?.error))
+                        {
+                            string desc = !string.IsNullOrEmpty(oauthError.error_description) ? $": {oauthError.error_description}" : "";
+                            Fail($"Token exchange failed: {oauthError.error}{desc} ({req.error})");
+                            return;
+                        }
+                    }
+                    catch (Exception) { /* body wasn't the expected OAuth error shape — fall through */ }
+                    Fail($"Token exchange failed: {req.error} — {detail}");
+                    return;
+                }
                 Fail($"Token exchange failed: {req.error}");
                 return;
             }
@@ -292,8 +373,7 @@ namespace Jiwe
         {
             using var req = UnityWebRequest.Get(UserInfoEndpoint);
             req.SetRequestHeader("Authorization", $"Bearer {accessToken}");
-            var op = req.SendWebRequest();
-            while (!op.isDone) await Task.Yield();
+            if (!await WaitBounded(req)) return; // best-effort — timeout/cancel here just skips the display-name refresh, login itself already succeeded
 
             if (req.result == UnityWebRequest.Result.Success)
             {
@@ -305,6 +385,27 @@ namespace Jiwe
         {
             Debug.LogWarning($"[JiweAuth] {message}");
             OnLoginFailed?.Invoke(message);
+        }
+
+        /// <summary>
+        /// Bounds every UnityWebRequest in the login flow so nothing can hang forever — Cancel() sets
+        /// _cancelled, which this notices on the next poll and aborts the request; networkTimeoutSeconds
+        /// otherwise fires on its own even if the player never taps Cancel.
+        /// </summary>
+        private async Task<bool> WaitBounded(UnityWebRequest req)
+        {
+            var op = req.SendWebRequest();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (!op.isDone)
+            {
+                if (_cancelled || sw.Elapsed.TotalSeconds > networkTimeoutSeconds)
+                {
+                    req.Abort();
+                    return false;
+                }
+                await Task.Yield();
+            }
+            return true;
         }
 
         private static Dictionary<string, string> ParseQuery(string url)
@@ -338,6 +439,7 @@ namespace Jiwe
             Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
         [Serializable] private class TokenResponse { public string access_token; public string id_token; public string token_type; public int expires_in; }
+        [Serializable] private class OAuthErrorResponse { public string error; public string error_description; }
     }
 
     [Serializable]

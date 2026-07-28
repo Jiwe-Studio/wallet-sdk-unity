@@ -1,5 +1,29 @@
 # Wallet API Documentation
 
+> **Read this box before shipping anything.** These are real bugs found (and fixed, in this SDK) while
+> building a live game against Jiwe's actual servers — not theoretical advice.
+>
+> 1. **Always give login a working "Skip"/"Cancel" button, the entire time login is in progress, not
+>    just before it starts.** A hung browser or a slow token exchange has no other way out. `JiweAuth.Cancel()`
+>    exists exactly for this — wire it to a button that stays clickable throughout, and call it
+>    unconditionally on Skip even if a login attempt is mid-flight.
+> 2. **`apiSecret` must be sent in the token exchange's POST body, on every platform, including mobile.**
+>    Confirmed by a live 401 (`invalid_client`) when it was omitted for a "public client" PKCE flow —
+>    Jiwe's server isn't OAuth-spec-pure here, it wants the secret regardless of client type. Don't
+>    remove it for security purity without re-testing against a real login first.
+> 3. **Never hardcode real credentials in a committed script or scene.** Load them at runtime from a
+>    gitignored config asset instead (a `ScriptableObject` works well) — see "Keeping credentials out of
+>    git" below. This SDK's own `clientId`/`apiSecret`/`apiUsername`/`apiKey` fields are Inspector values
+>    for exactly that reason: assign them on a prefab/asset that's gitignored, not by editing this script.
+> 4. **If you ever need to force players on old builds to update, rotate `apiUsername`/`apiKey` server-side
+>    and call `JiweWallet.CheckCredentialsValid()` once at startup.** It reports `false` only on a
+>    definitive 401/403 — never on a transient network failure — so it's safe to gate a "please update"
+>    banner on directly.
+> 5. **A `HttpListener.Stop()` called before its response is fully written disposes the response mid-write
+>    and throws silently inside async code.** Already fixed in this SDK's loopback path (see the comment
+>    in `LoginViaLoopback`) — if you ever touch that method, keep `Stop()` AFTER the browser response is
+>    sent, not in a `finally` right after the redirect is caught.
+
 The Jiwe Wallet API is designed to allow you to authenticate players and allow them to receive rewards and make purchases on their accounts.
 
 As the developer, the game will be drawing and crediting your account for any in-game transaction by players. You can keep track of transactions through the Jiwe IO wallet dashboard for your records and to make sure you have a positive wallet balance to maintain normal functionality.
@@ -87,6 +111,42 @@ Leave `loginOnStart` checked (default) to log in automatically when the scene lo
 
 1. Test by running the game (or a WebGL/Android build) — it should open the Jiwe login page, and once you log in, `JiweAuth.OnLoginSuccess` fires and `jiweAuth.IsLoggedIn` becomes true.
 2. If login fails, `JiweAuth.OnLoginFailed` fires with a message (also logged as a `Debug.LogWarning`) — nothing else in the SDK force-stops your game, so how you gate gameplay on login is up to you.
+3. **Always wire a Skip/Cancel button that stays clickable the whole time login is in progress**, calling `jiweAuth.Cancel()`:
+
+```csharp
+skipButton.onClick.AddListener(() => {
+    jiweAuth.Cancel(); // no-op if nothing's in progress — safe to call unconditionally
+    ShowMainMenuAnonymously();
+});
+```
+
+`networkTimeoutSeconds` (default 20) also bounds the flow on its own even if the player never taps Skip — a hung browser or dead network eventually fails visibly instead of hanging forever.
+
+**Keeping credentials out of git:** don't type real values into `clientId`/`apiSecret`/`apiUsername`/`apiKey` on a committed prefab or scene. Instead, create a small `ScriptableObject` (gitignored) that holds the real values, and have your own startup code copy them into these fields at runtime — e.g.:
+
+```csharp
+// A gitignored asset (Resources/MyJiweCredentials.asset) holding real values, loaded once at startup:
+var config = Resources.Load<MyJiweCredentialsConfig>("MyJiweCredentials");
+if (config != null)
+{
+    jiweAuth.clientId = config.clientId;
+    jiweAuth.apiSecret = config.apiSecret;
+    jiweWallet.apiUsername = config.apiUsername;
+    jiweWallet.apiKey = config.apiKey;
+}
+```
+
+This is the same pattern used in the reference implementation this SDK was extracted from — one `.gitignore` line (`Assets/Resources/MyJiweCredentials.asset`) keeps real keys from ever being committed, while every scene rebuild/re-import still picks them up correctly.
+
+**Forcing an update via key rotation:** if you ever need to push all players to a new build (a breaking API change, a security rotation, etc.), rotate `apiUsername`/`apiKey` on Jiwe's side and check for it at startup:
+
+```csharp
+jiweWallet.CheckCredentialsValid(valid => {
+    if (!valid) ShowUpdateRequiredBanner(); // old builds still holding the rotated-out keys land here
+});
+```
+
+This only fires `false` on a real 401/403 — a flaky network or a server hiccup reports `true`, so it's safe to gate directly on the result without worrying about false positives locking players out during an unrelated outage.
 
 * * *
 

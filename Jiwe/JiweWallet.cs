@@ -29,6 +29,7 @@ namespace Jiwe
     public class JiweWallet : MonoBehaviour
     {
         private const string BaseUrl = "https://abacus.jiwe.io/rest/api/v1";
+        private const int NetworkTimeoutSeconds = 20; // UnityWebRequest's own built-in timeout — no cancel button needed here since these are one-shot fire-and-forget calls, not a blocking login screen (contrast JiweAuth.WaitBounded, which also supports an explicit Cancel())
 
         [Header("Your Jiwe wallet API credentials (Jiwe profile > Apps)")]
         public string apiUsername;
@@ -90,6 +91,32 @@ namespace Jiwe
             StartCoroutine(PostReward($"{BaseUrl}/transactions/status", JsonUtility.ToJson(payload), onComplete, requireToken: false));
         }
 
+        /// <summary>
+        /// Checks whether THIS BUILD's own apiUsername/apiKey are still accepted by Jiwe — the mechanism
+        /// behind a deliberate forced-update flow: rotate these keys server-side, and every build still
+        /// holding the old ones can detect it next launch and prompt players to update, rather than
+        /// silently failing every wallet call with no explanation. onResult gets `false` ONLY on a
+        /// definitive 401/403 (credentials actively rejected); everything else (network blip, timeout,
+        /// 5xx) reports `true`, so a transient outage is never mistaken for "this build is stale" — that
+        /// distinction matters, an over-eager forced-update prompt is worse than not having one.
+        /// Call this once at startup and gate your own "update required" UI on the result.
+        /// </summary>
+        public void CheckCredentialsValid(Action<bool> onResult)
+        {
+            StartCoroutine(CheckCredentials(onResult));
+        }
+
+        private IEnumerator CheckCredentials(Action<bool> onResult)
+        {
+            using var req = UnityWebRequest.Get($"{BaseUrl}/clients/account-balance");
+            req.timeout = NetworkTimeoutSeconds;
+            ApplyStaticHeaders(req);
+            yield return req.SendWebRequest();
+
+            if (req.result == UnityWebRequest.Result.Success) { onResult?.Invoke(true); yield break; }
+            onResult?.Invoke(req.responseCode != 401 && req.responseCode != 403);
+        }
+
         // -----------------------------------------------------------------
         // Requests
         // -----------------------------------------------------------------
@@ -103,6 +130,7 @@ namespace Jiwe
             }
 
             using var req = new UnityWebRequest(url, "POST");
+            req.timeout = NetworkTimeoutSeconds;
             req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(jsonPayload));
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");
@@ -131,6 +159,7 @@ namespace Jiwe
         private IEnumerator GetBalance(Action<JiweWalletBalanceResult> onComplete)
         {
             using var req = UnityWebRequest.Get($"{BaseUrl}/clients/account-balance");
+            req.timeout = NetworkTimeoutSeconds;
             ApplyStaticHeaders(req);
             yield return req.SendWebRequest();
 
@@ -147,6 +176,7 @@ namespace Jiwe
         private IEnumerator PostLeaderboard(string jsonPayload, Action<JiweLeaderboardResult> onComplete)
         {
             using var req = new UnityWebRequest($"{BaseUrl}/leaderboard", "POST");
+            req.timeout = NetworkTimeoutSeconds;
             req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(jsonPayload));
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");

@@ -1,240 +1,272 @@
-# Wallet API Documentation
+# Jiwe Wallet SDK for Unity
 
-> **Read this box before shipping anything.** These are real bugs found (and fixed, in this SDK) while
-> building a live game against Jiwe's actual servers — not theoretical advice.
->
-> 1. **Always give login a working "Skip"/"Cancel" button, the entire time login is in progress, not
->    just before it starts.** A hung browser or a slow token exchange has no other way out. `JiweAuth.Cancel()`
->    exists exactly for this — wire it to a button that stays clickable throughout, and call it
->    unconditionally on Skip even if a login attempt is mid-flight.
-> 2. **`apiSecret` must be sent in the token exchange's POST body, on every platform, including mobile.**
->    Confirmed by a live 401 (`invalid_client`) when it was omitted for a "public client" PKCE flow —
->    Jiwe's server isn't OAuth-spec-pure here, it wants the secret regardless of client type. Don't
->    remove it for security purity without re-testing against a real login first.
-> 3. **Never hardcode real credentials in a committed script or scene.** Load them at runtime from a
->    gitignored config asset instead (a `ScriptableObject` works well) — see "Keeping credentials out of
->    git" below. This SDK's own `clientId`/`apiSecret`/`apiUsername`/`apiKey` fields are Inspector values
->    for exactly that reason: assign them on a prefab/asset that's gitignored, not by editing this script.
-> 4. **If you ever need to force players on old builds to update, rotate `apiUsername`/`apiKey` server-side
->    and call `JiweWallet.CheckCredentialsValid()` once at startup.** It reports `false` only on a
->    definitive 401/403 — never on a transient network failure — so it's safe to gate a "please update"
->    banner on directly.
-> 5. **A `HttpListener.Stop()` called before its response is fully written disposes the response mid-write
->    and throws silently inside async code.** Already fixed in this SDK's loopback path (see the comment
->    in `LoginViaLoopback`) — if you ever touch that method, keep `Stop()` AFTER the browser response is
->    sent, not in a `finally` right after the redirect is caught.
+Log players into Jiwe with OAuth2 + PKCE, then credit them XP/points/airtime and read
+leaderboard/wallet data — against Jiwe's real, live API (`id.jiwe.io` for auth,
+`abacus.jiwe.io` for wallet calls).
 
-The Jiwe Wallet API is designed to allow you to authenticate players and allow them to receive rewards and make purchases on their accounts.
+Two scripts, no dependencies: `JiweAuth.cs` handles login, `JiweWallet.cs` handles
+everything else. Copy `Jiwe/` into `Assets/` and you're done importing.
 
-As the developer, the game will be drawing and crediting your account for any in-game transaction by players. You can keep track of transactions through the Jiwe IO wallet dashboard for your records and to make sure you have a positive wallet balance to maintain normal functionality.
+> **This doc is Unity-specific.** The concepts below — two credential pairs, the
+> reward/leaderboard API shape, the security rules — are the same on any engine.
+> If you're building the Unreal or Godot SDK next, sections 2–4 are the ones to
+> port; only §5 (platform redirect handling) is Unity/C#-specific.
 
-Content:
+---
 
-1. Getting started on Jiwe IO
+## 1. Architecture at a glance
 
-   1. Registering on Jiwe IO
-   2. Connecting Your Jiwe IO wallet to Your Celo Wallet
+```mermaid
+flowchart LR
+    subgraph Game["Your Unity Game"]
+        A["JiweAuth\n(login)"]
+        W["JiweWallet\n(rewards, leaderboard,\nbalance)"]
+        A -- "IdToken" --> W
+    end
 
-2. Adding authentication into the game
+    A -- "OAuth2 + PKCE" --> ID["id.jiwe.io\n(login server)"]
+    W -- "X-API-TOKEN (player)\nX-API-USERNAME/KEY (app)" --> AB["abacus.jiwe.io\n(wallet API)"]
+```
 
-   1. How authentication works
-   2. Generating game wallet ID
-   3. Downloading and importing the JiweWallet SDK for Unity
-   4. Integrating the game wallet ID
+`JiweAuth` logs a *player* in and produces an `IdToken`. `JiweWallet` uses that token
+for player-scoped calls, plus a separate static credential pair for app-scoped calls.
+They're independent components wired together by one Inspector reference
+(`JiweWallet.auth`).
 
-3. Adding purchase and reward functionality through the JiweWallet SDK for Unity
+---
 
-   1. How the functionality works
-   2. Adding rewards
-   3. Adding purchases
+## 2. Two credential pairs — don't confuse them
 
-4. Download and play the game
+This is the single most common integration mistake: there are **two unrelated
+credential pairs**, not one.
 
-5. Withdrawing to Celo or Mpesa (Kotani Pay)
+| Pair | Lives on | Identifies | Required for |
+|---|---|---|---|
+| `clientId` + `apiSecret` | `JiweAuth` | your **app**, used to run OAuth login | Logging a player in at all |
+| `apiUsername` + `apiKey` | `JiweWallet` | your **app**, sent as `X-API-USERNAME`/`X-API-KEY` | Every wallet API call, even before login |
 
-* * *
+Get all four by logging in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
+**My Apps** → **Create an Application** — one application per game.
 
-1. **Getting started on Jiwe IO:**
+```mermaid
+flowchart TB
+    subgraph NoLoginNeeded["Work without a logged-in player"]
+        direction LR
+        L1["GetLeaderboard"]
+        L2["GetWalletBalance"]
+        L3["GetTransactionStatus"]
+        L4["CheckCredentialsValid"]
+    end
+    subgraph LoginRequired["Require IdToken (player logged in)"]
+        direction LR
+        R1["GiveXpReward"]
+        R2["GivePointsReward"]
+        R3["GiveAirtimeReward"]
+    end
+    Static(["apiUsername / apiKey only"]) --> NoLoginNeeded
+    Token(["apiUsername / apiKey\n+ player IdToken"]) --> LoginRequired
+```
 
-1. Register on Jiwe IO
-2. Connecting Celo Wallet to Jiwe Wallet
+There is **no purchase (charge-the-player) endpoint** in the current API — an older
+SDK's `Purchase()` call has no live equivalent and was removed rather than left
+pointing at a dead host.
 
-a) Register on Jiwe IO
+---
 
-1. Go to[www.jiwe.io](http://www.jiwe.io), click signup to register your account, and log in with the created account
-2. Once logged in click browse games which will take you to the games library and on the panel on the left-hand side click wallet to set up your wallet.
+## 3. Quickstart
 
-b)Creating your Jiwe IO wallet and connecting it to your Celo wallet
+1. **Get credentials.** Log in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
+   **My Apps** → **Create an Application** to generate `clientId` / `apiSecret` /
+   `apiUsername` / `apiKey` for this game.
+2. **Import.** Copy `Jiwe/` (`JiweAuth.cs` + `JiweWallet.cs`) into `Assets/`. No
+   Newtonsoft dependency — it uses Unity's built-in `JsonUtility`.
+3. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
+   `JiweWallet` to it, and drag the `JiweAuth` component into `JiweWallet.auth`.
+4. **Fill in credentials** on the two components (see the table in §2). Do this via a
+   gitignored config asset, not hardcoded — see §6.
+5. **Run.** With `loginOnStart` checked (default), the login page opens automatically;
+   `JiweAuth.OnLoginSuccess` fires once `IdToken` is populated.
 
-1. Follow the instructions on the wallet page to connect to the Celo wallet (Alfajores Test Wallet). To test your wallet
-2. Request funds from[rock@jiwe.io](mailto:rock@jiwe.io) or whatapp +254773754444 to top up your Alfajores Test Wallet, and then from Alfajores wallet you can send and recieve from your Jiwe wallet page.
+```csharp
+jiweAuth.OnLoginSuccess += () => {
+    jiweWallet.GiveXpReward(20, "Reward for passing boss#1", result => {
+        if (result.Success) Debug.Log("XP awarded!");
+        else Debug.LogWarning($"XP reward failed: {result.Error}");
+    });
+};
+```
 
-* * *
+---
 
-**2)Adding authentication to your game:**
+## 4. API reference
 
-**How authentication works:**
+All calls are async/callback-based; every result carries `Success` + `Error` (+
+call-specific fields).
 
-![](https://lh4.googleusercontent.com/m5CsdPl_rfCqGatj-jnBH2ew7bHhB-jsALx-BhF8rwVZrdqfNrIKT5kmIT5CVXM-F71mIFj-IftC6k7h9n87Dw5i2sodFwumGpNcKL1UAup4hRoQawAYEBqr0ttiBD4wtIbH5qTmCbkMZ3HMBIm6eZG_csu-juziV9vmp76xBIasefDg7MrjfnF-qg)**  
-****Steps:**
+| Method | Needs login? | Notes |
+|---|---|---|
+| `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | XP has no monetary value |
+| `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | "Cowrie" — Jiwe's in-game currency |
+| `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Min. 5 units; credits real airtime |
+| `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
+| `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
+| `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
+| `CheckCredentialsValid(onResult)` | No | See §7, forced-update pattern |
 
-1. Generating game wallet ID API key (Each game requires a unique wallet ID)
-2. Downloading and importing the `Jiwe/` folder and configuring your app credentials
+`transactionId` is auto-generated if omitted. All three reward calls return the same
+`JiweWalletResult { Success, Error, RawResponse }` shape.
 
-1. **Generating the game wallet ID**
+```csharp
+jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking: "highest", result => {
+    if (result.Success)
+        foreach (var e in result.Entries) Debug.Log($"{e.rank}. {e.name} — {e.currentXP}");
+});
+```
 
-1. Go to your profile settings by selecting the profile button on the left panel on Jiwe IO
-2. Select Apps from the top tabs, follow the instructions and generate a unique Game Wallet ID, API Key and API Secret for each game you create  
+---
 
-   (For security purposes a unique key is required for each game to be able to validate or invalidate each game individually.)
+## 5. Login flow, per platform
 
-**B. Download and import the JiweWallet SDK to your game**
+`JiweAuth` runs standard OAuth2 Authorization Code + PKCE, but how the browser hands
+control back to your game is inherently different per platform — this is the one part
+of the SDK that can't be unified.
 
-Copy the `Jiwe/` folder (`JiweAuth.cs` + `JiweWallet.cs`) into your project's `Assets/` — that's the whole SDK now. No extra DLLs to import: the endpoint URLs (`id.jiwe.io/auth`, `/token`, `/me`) are built in, and there's no Newtonsoft.Json dependency to drag in separately (the SDK uses Unity's own `JsonUtility`).
+```mermaid
+sequenceDiagram
+    participant Game
+    participant Browser as System Browser
+    participant Jiwe as id.jiwe.io
 
-- In your Hierarchy, create an empty GameObject (e.g. "JiweSDK") and add both the **JiweAuth** and **JiweWallet** components to it
-- On **JiweWallet**, drag the same GameObject's **JiweAuth** component into the `auth` field
-- Fill in your credentials from your Jiwe profile page — note these are **two separate credential pairs**, not one:
-  - On **JiweAuth** (OAuth login): `clientId`, `apiSecret` (sent as the token endpoint's `client_secret`)
-  - On **JiweWallet** (wallet API calls): `apiUsername`, `apiKey` — sent as `X-API-USERNAME`/`X-API-KEY` on every wallet call. These are static per-app and don't require a player to be logged in, which is why leaderboard/wallet-balance/transaction-status calls work even before login.
-  - `mobileRedirectScheme` (on JiweAuth) — **Android/iOS builds only**; a custom URI scheme (e.g. `yourgame`) that you must also register with Jiwe as an allowed redirect URI. Not used on Standalone or WebGL.
+    Game->>Browser: Open login URL (code_challenge)
+    Browser->>Jiwe: Player logs in
+    Jiwe-->>Browser: Redirect with ?code=...&state=...
 
-**The login redirect itself works differently per platform** (this is inherent to how each platform's browser integration works, not a config choice):
+    alt Standalone / Editor
+        Browser->>Game: GET http://127.0.0.1:{port}/  (loopback listener)
+    else Android / iOS
+        Browser->>Game: Custom URI scheme reopens app (deep link)
+    else WebGL
+        Browser->>Game: Full-page redirect back to same hosted URL
+    end
 
-| Platform | How the redirect gets back to your game |
-|---|---|
-| Standalone / Editor | A local loopback HTTP server catches the browser's redirect automatically — no extra setup. |
-| Android / iOS | The system browser redirects to your custom URI scheme, which reopens the app. Requires registering that redirect URI with Jiwe first. |
-| WebGL | Jiwe's login page redirects back to your **same hosted game URL** with the auth code attached; the page reloads and the SDK resumes automatically. **Your Jiwe app must allow CORS from your hosted domain**, since the token exchange happens as a browser-side request — ask Jiwe to whitelist your domain if this fails with a CORS error in the browser console. |
+    Game->>Jiwe: POST /token (code, code_verifier, client_secret)
+    Jiwe-->>Game: id_token, access_token
+    Game->>Game: IdToken set, OnLoginSuccess fires
+```
 
-Leave `loginOnStart` checked (default) to log in automatically when the scene loads, or uncheck it and call `jiweAuth.Login()` yourself (e.g. from a "Log in with Jiwe" button) if you'd rather not block on login before showing any menu.
+| Platform | Mechanism | Extra setup |
+|---|---|---|
+| Standalone / Editor | Local loopback HTTP listener catches the redirect | None |
+| Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe |
+| WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain |
 
-1. Test by running the game (or a WebGL/Android build) — it should open the Jiwe login page, and once you log in, `JiweAuth.OnLoginSuccess` fires and `jiweAuth.IsLoggedIn` becomes true.
-2. If login fails, `JiweAuth.OnLoginFailed` fires with a message (also logged as a `Debug.LogWarning`) — nothing else in the SDK force-stops your game, so how you gate gameplay on login is up to you.
-3. **Always wire a Skip/Cancel button that stays clickable the whole time login is in progress**, calling `jiweAuth.Cancel()`:
+`networkTimeoutSeconds` (default 20s) bounds every step of this flow — a hung browser
+or dead network fails visibly instead of hanging forever. **Always** also wire a
+Skip/Cancel button, clickable the *entire* time login is in progress:
 
 ```csharp
 skipButton.onClick.AddListener(() => {
-    jiweAuth.Cancel(); // no-op if nothing's in progress — safe to call unconditionally
+    jiweAuth.Cancel(); // safe to call unconditionally, even if nothing's in progress
     ShowMainMenuAnonymously();
 });
 ```
 
-`networkTimeoutSeconds` (default 20) also bounds the flow on its own even if the player never taps Skip — a hung browser or dead network eventually fails visibly instead of hanging forever.
+---
 
-**Keeping credentials out of git:** don't type real values into `clientId`/`apiSecret`/`apiUsername`/`apiKey` on a committed prefab or scene. Instead, create a small `ScriptableObject` (gitignored) that holds the real values, and have your own startup code copy them into these fields at runtime — e.g.:
+## 6. Security checklist
 
-```csharp
-// A gitignored asset (Resources/MyJiweCredentials.asset) holding real values, loaded once at startup:
-var config = Resources.Load<MyJiweCredentialsConfig>("MyJiweCredentials");
-if (config != null)
-{
-    jiweAuth.clientId = config.clientId;
-    jiweAuth.apiSecret = config.apiSecret;
-    jiweWallet.apiUsername = config.apiUsername;
-    jiweWallet.apiKey = config.apiKey;
-}
-```
+Real bugs found (and fixed, in this SDK) shipping a live game against Jiwe's actual
+servers — not theoretical advice.
 
-This is the same pattern used in the reference implementation this SDK was extracted from — one `.gitignore` line (`Assets/Resources/MyJiweCredentials.asset`) keeps real keys from ever being committed, while every scene rebuild/re-import still picks them up correctly.
+- [ ] **Skip/Cancel button stays clickable for the whole login flow**, not just
+      before it starts. This was the single costliest mistake building against this
+      SDK.
+- [ ] **`apiSecret` is sent in the token exchange's POST body on every platform**,
+      including a pure-PKCE mobile flow. Confirmed by a live 401 `invalid_client`
+      when omitted — Jiwe's server isn't spec-pure "public client" here. Don't
+      "fix" this away without re-testing against a real login.
+- [ ] **No real credentials hardcoded in a committed script/scene/prefab.** Load
+      them at runtime from a gitignored `ScriptableObject`:
 
-**Forcing an update via key rotation:** if you ever need to push all players to a new build (a breaking API change, a security rotation, etc.), rotate `apiUsername`/`apiKey` on Jiwe's side and check for it at startup:
+  ```csharp
+  var config = Resources.Load<MyJiweCredentialsConfig>("MyJiweCredentials");
+  if (config != null) {
+      jiweAuth.clientId = config.clientId;
+      jiweAuth.apiSecret = config.apiSecret;
+      jiweWallet.apiUsername = config.apiUsername;
+      jiweWallet.apiKey = config.apiKey;
+  }
+  ```
+  One `.gitignore` line (`Assets/Resources/MyJiweCredentials.asset`) keeps real keys
+  out of git while every rebuild still picks them up.
+
+---
+
+## 7. Forcing an update via key rotation
+
+If you need to push all players to a new build (breaking API change, key
+compromise), rotate `apiUsername`/`apiKey` on Jiwe's side and gate a banner on
+`CheckCredentialsValid`:
 
 ```csharp
 jiweWallet.CheckCredentialsValid(valid => {
-    if (!valid) ShowUpdateRequiredBanner(); // old builds still holding the rotated-out keys land here
+    if (!valid) ShowUpdateRequiredBanner();
 });
 ```
 
-This only fires `false` on a real 401/403 — a flaky network or a server hiccup reports `true`, so it's safe to gate directly on the result without worrying about false positives locking players out during an unrelated outage.
+This reports `false` **only** on a definitive 401/403 (credentials actively
+rejected) — a network blip, timeout, or 5xx reports `true`, so a transient outage is
+never mistaken for "this build is stale."
 
-* * *
+---
 
-**3. Adding reward, leaderboard, and wallet functionality through the JiweWallet SDK**
+## 8. Troubleshooting
 
-**3a. How it works:**
+| Symptom | Cause | Fix |
+|---|---|---|
+| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §6 |
+| Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§5) |
+| WebGL token exchange fails with a CORS error | Jiwe hasn't allow-listed your hosted domain | Ask Jiwe to whitelist your domain |
+| Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
+| Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
+| Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
 
-![](https://lh3.googleusercontent.com/nxz3WieVAfGAm-ftFibi9yAX5AP_y1YgH94opxO2PMVmd9lPZXA2Z4e0hzFFs-e_M2ItXbKBdps6hxGuLJYbPMUtuzKNwf35Pi6RrYmZgfBMui_a0xA4lYyVF9JzK5SlPVLJvWnil-sys6R08kegwowMNMJnyM4va120DzuHz4GSqTM_GSZn3AtELQ)
+Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
+Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
 
-Reward calls (XP, points, airtime) credit the logged-in player and require `JiweAuth.IsLoggedIn` to be true first. Leaderboard, wallet balance, and transaction status are scoped to your app rather than a player, so they work any time — no login needed.
+---
 
-> **There is no "purchase" (charge-the-player) call.** The previous SDK's `Purchase()` doesn't correspond to anything in the current Jiwe Wallet API and has been removed rather than left pointing at a stale host. If Jiwe adds a player-purchase endpoint later, it can be added to `JiweWallet.cs` following the same pattern as the reward methods below.
+## 9. Jiwe IO platform basics
 
-**a) XP reward** — for progress/skill milestones; XP has no monetary value in Jiwe:
+Steps outside the SDK itself — registering an account and creating your application.
 
-```csharp
-jiweWallet.GiveXpReward(20, "Reward for passing boss#1", result => {
-    if (result.Success) Debug.Log("XP awarded!");
-    else Debug.LogWarning($"XP reward failed: {result.Error}");
-});
-```
+<details>
+<summary>Registering on Jiwe IO and creating an application</summary>
 
-**b) Points (Cowrie) reward** — Jiwe's monetary in-game currency:
+1. Go to [www.jiwe.io](http://www.jiwe.io), sign up, and log in.
+2. Open **Profile** → **My Apps**.
+3. **Create an Application** — this generates the `clientId` / `apiSecret` /
+   `apiUsername` / `apiKey` set your game needs (see §2). Create one application
+   per game.
 
-```csharp
-jiweWallet.GivePointsReward(20, "Reward for passing boss#1", result => { /* same result shape */ });
-```
+</details>
 
-**c) Airtime reward** — credits real phone airtime to a recipient number, at least 5 units:
+<details>
+<summary>Uploading your game to Jiwe IO</summary>
 
-```csharp
-jiweWallet.GiveAirtimeReward(20, "254722334455", "Weekly top-grinder payout", result => { /* same result shape */ });
-```
+Upload directly from the Jiwe IO upload page — no form or manual handoff needed.
 
-All three take an optional `transactionId` (auto-generated if omitted) and return a `JiweWalletResult` (`Success`, `Error`, `RawResponse`) in the callback — check `result.Success` to show failures (e.g. reward amount below the API's minimum, or your app's wallet at 0) to the player instead of only reading the console log.
+</details>
 
-**d) Leaderboard:**
+---
 
-```csharp
-jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking: "highest", result => {
-    if (result.Success) foreach (var e in result.Entries) Debug.Log($"{e.rank}. {e.name} — {e.currentXP}");
-});
-```
-`rewardType` is `"xp"` or `"cowrie"`; `period` is `"day"`/`"week"`/`"month"`/`"year"`, or `null` for all-time.
+## Roadmap
 
-**e) Wallet balance** (your app's own Jiwe wallet, not a player's):
-
-```csharp
-jiweWallet.GetWalletBalance(result => {
-    if (result.Success) Debug.Log($"Available: {result.Available}");
-});
-```
-
-**f) Transaction status** — check any `ledger_transaction_id` returned by the calls above:
-
-```csharp
-jiweWallet.GetTransactionStatus(transactionId, result => Debug.Log(result.RawResponse));
-```
-
-* * *
-
-**4)Uploading your game to Jiwe IO**
-
-The upload functionality is currently disabled, please send your game by filling this[form](https://docs.google.com/forms/d/e/1FAIpQLSdhm05d9BqPreGTqGIIFeqWZl47hhP0jOgIKTPsfDFaOVIk7Q/viewform) and informing [rock@jiwe.io](mailto:rock@jiwe.io) and copy [charles@jiwe.io](mailto:charles@jiwe.io) who will upload your game within 1 day.
-
-Once uploaded, to play the game:
-
-1. Navigate to[www.jiwe.io](http://www.jiwe.io)
-2. Login to Jiwe IO
-3. Select the game
-
-* * *
-
-**5)Withdrawing**
-
-a)From Jiwe IO to Celo
-
-b)From Celo to Mpesa using Kotani Pay
-
-**a)Withdrawing from Jiwe IO to Celo**  
--Navigate to your wallet page and select withdraw to Celo and enter the amount to withdraw and click ok.
-
-The amount will be transferred to your Celo wallet
-
-**b)Transfering from Celo to Mpesa using Kotani Pay**
-
-1. Link your Celo wallet with Kotani Pay to withdraw to Mpesa
-2. Dial USSD code \*483\*354# and link your Celo wallet and Kotani Pay
-3. Dial USSD code \*483\*354# and select widthraw to withdraw your funds to Mpesa
-
-* * *
+- **Unreal and Godot SDKs.** When they land, §2–4 above (credential model, API
+  surface, security checklist) should carry over almost unchanged — only §5
+  (platform redirect mechanics) is engine-specific and will need its own writeup
+  per engine.
+- **Celo wallet / Kotani Pay withdrawal flow.** Partially built — connecting a
+  Jiwe wallet to Celo and withdrawing out to M-Pesa via Kotani Pay exists but
+  isn't finished end-to-end. Not documented here yet; will get its own section
+  once the flow is stable.

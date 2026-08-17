@@ -77,7 +77,9 @@ pointing at a dead host.
 
 1. **Get credentials.** Log in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
    **My Apps** → **Create an Application** to generate `clientId` / `apiSecret` /
-   `apiUsername` / `apiKey` for this game.
+   `apiUsername` / `apiKey` for this game. The form also asks for **Redirect URIs**
+   and scopes — see §5 for exactly what to put there, it isn't obvious from the
+   form alone.
 2. **Import.** Copy `Jiwe/` (`JiweAuth.cs` + `JiweWallet.cs`) into `Assets/`. No
    Newtonsoft dependency — it uses Unity's built-in `JsonUtility`.
 3. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
@@ -160,6 +162,32 @@ sequenceDiagram
 | Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe |
 | WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain |
 
+### Redirect URIs — what to put in the "Redirect URIs" field
+
+When you create your application (§9), the form has a **Redirect URIs** field that's
+left blank by default — there's no platform default shown in the UI, and it's easy to
+not know what belongs there. This is exactly what each platform's branch above sends
+as `redirect_uri` in the login request, so it has to match what you register:
+
+| Platform | `redirect_uri` the SDK actually sends | Register this |
+|---|---|---|
+| Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login** | `http://127.0.0.1/` — see caveat below |
+| Android / iOS | `<mobileRedirectScheme>://oauth-callback` — default scheme is `jiwewallet` unless you changed the `mobileRedirectScheme` field on `JiweAuth` | `jiwewallet://oauth-callback` (or your own scheme, kept in sync with the Inspector field) |
+| WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — add both a staging and production entry if you have separate domains |
+
+> **Standalone/Editor picks a random loopback port on every login**, so it can never
+> match one fixed `redirect_uri` exactly. If Jiwe's server validates `redirect_uri`
+> as an exact string match, Editor testing will fail with a redirect_uri error no
+> matter what you register. Two ways out: ask Jiwe (§8 support contact) whether
+> standalone/editor redirect validation is host-based rather than exact-match, or
+> pin `GetFreeLoopbackPort()` in `JiweAuth.cs` to a fixed port and register that
+> exact `http://127.0.0.1:<port>/` instead.
+
+The form also has an **"My app will..."** scope checklist — check every scope the SDK
+actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see the
+`Scope` constant in `JiweAuth.cs`). Leaving one unchecked here produces the same
+undiagnosable `access_denied` redirect as a missing `scope` param.
+
 `networkTimeoutSeconds` (default 20s) bounds every step of this flow — a hung browser
 or dead network fails visibly instead of hanging forever. **Always** also wire a
 Skip/Cancel button, clickable the *entire* time login is in progress:
@@ -230,6 +258,7 @@ never mistaken for "this build is stale."
 | Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
 | Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
+| Login redirect fails / `redirect_uri` error, only in Editor | Standalone/Editor's random loopback port doesn't match a registered exact `redirect_uri` | See the caveat under §5 "Redirect URIs" |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
 Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
@@ -247,7 +276,9 @@ Steps outside the SDK itself — registering an account and creating your applic
 2. Open **Profile** → **My Apps**.
 3. **Create an Application** — this generates the `clientId` / `apiSecret` /
    `apiUsername` / `apiKey` set your game needs (see §2). Create one application
-   per game.
+   per game. When you get to **Redirect URIs** and the scope checklist, see §5 —
+   both are easy to get wrong and fail silently with an undiagnosable
+   `access_denied`.
 
 </details>
 

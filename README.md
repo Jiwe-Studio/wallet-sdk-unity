@@ -8,9 +8,10 @@ Two scripts, no dependencies: `JiweAuth.cs` handles login, `JiweWallet.cs` handl
 everything else. Copy `Jiwe/` into `Assets/` and you're done importing.
 
 > **This doc is Unity-specific.** The concepts below — two credential pairs, the
-> reward/leaderboard API shape, the security rules — are the same on any engine.
-> If you're building the Unreal or Godot SDK next, sections 2–4 are the ones to
-> port; only §5 (platform redirect handling) is Unity/C#-specific.
+> redirect-URI model, the reward/leaderboard API shape, the security rules — are the
+> same on any engine. If you're building the Unreal or Godot SDK next, §2, §3, §5,
+> §7, and §8 are the ones to port; §4 (Quickstart) and §6 (per-platform login
+> mechanics) are Unity/C#-specific.
 
 ---
 
@@ -46,7 +47,9 @@ credential pairs**, not one.
 | `apiUsername` + `apiKey` | `JiweWallet` | your **app**, sent as `X-API-USERNAME`/`X-API-KEY` | Every wallet API call, even before login |
 
 Get all four by logging in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
-**My Apps** → **Create an Application** — one application per game.
+**My Apps** → **Create an Application** — one application per game. **Before you
+open that form, read §3** — it asks for a Redirect URI you need to have decided
+already, not something to improvise mid-form.
 
 ```mermaid
 flowchart TB
@@ -73,20 +76,53 @@ pointing at a dead host.
 
 ---
 
-## 3. Quickstart
+## 3. Redirect URIs — decide these *before* you create your app
 
-1. **Get credentials.** Log in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
-   **My Apps** → **Create an Application** to generate `clientId` / `apiSecret` /
-   `apiUsername` / `apiKey` for this game. The form also asks for **Redirect URIs**
-   and scopes — see §5 for exactly what to put there, it isn't obvious from the
-   form alone.
-2. **Import.** Copy `Jiwe/` (`JiweAuth.cs` + `JiweWallet.cs`) into `Assets/`. No
+The app-creation form (§2) has a **Redirect URIs** field that's blank by default,
+with no platform default shown in the UI. **Jiwe doesn't generate or infer this
+value — you define it yourself, once, in the form** — and it must then match,
+exactly, whatever `redirect_uri` your build actually sends on login. Decide these
+per platform *before* you fill in the form, using what `JiweAuth` actually sends:
+
+| Platform | `redirect_uri` the SDK actually sends | Register this |
+|---|---|---|
+| Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login**, as shipped | Not registerable as-is — see fix below |
+| Android / iOS | `<mobileRedirectScheme>://oauth-callback` — default scheme is `jiwewallet` unless you changed the `mobileRedirectScheme` field on `JiweAuth` | `jiwewallet://oauth-callback` (or your own scheme, kept in sync with the Inspector field) |
+| WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — add both a staging and production entry if you have separate domains |
+
+> **Standalone/Editor as shipped can't be registered, because it's not one fixed
+> value** — `JiweAuth` picks a new free loopback port every login
+> (`GetFreeLoopbackPort()` in `JiweAuth.cs`), and since the redirect URI you
+> register is a value *you* fix once in the form, a moving port can never match it.
+> **Before your first Standalone/Editor login test**, pin that method to a single
+> constant port (e.g. `http://127.0.0.1:53682/`) and register that exact string.
+> Skipping this means Standalone/Editor login fails on every attempt with a
+> redirect_uri mismatch — it isn't optional or Editor-only-a-quirk, it's required
+> for that platform to work at all.
+
+The same form also has an **"My app will..."** scope checklist — check every scope
+the SDK actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see
+the `Scope` constant in `JiweAuth.cs`). Leaving one unchecked produces the same
+undiagnosable `access_denied` redirect as a missing `scope` param — decide this
+alongside your redirect URIs, not after a failed login.
+
+---
+
+## 4. Quickstart
+
+1. **Decide your redirect URIs and scopes** — see §3. Do this first; you need the
+   values in hand for step 2.
+2. **Get credentials.** Log in at [www.jiwe.io](http://www.jiwe.io) → **Profile** →
+   **My Apps** → **Create an Application**, entering the redirect URIs/scopes from
+   step 1, to generate `clientId` / `apiSecret` / `apiUsername` / `apiKey` for this
+   game.
+3. **Import.** Copy `Jiwe/` (`JiweAuth.cs` + `JiweWallet.cs`) into `Assets/`. No
    Newtonsoft dependency — it uses Unity's built-in `JsonUtility`.
-3. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
+4. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
    `JiweWallet` to it, and drag the `JiweAuth` component into `JiweWallet.auth`.
-4. **Fill in credentials** on the two components (see the table in §2). Do this via a
-   gitignored config asset, not hardcoded — see §6.
-5. **Run.** With `loginOnStart` checked (default), the login page opens automatically;
+5. **Fill in credentials** on the two components (see the table in §2). Do this via a
+   gitignored config asset, not hardcoded — see §7.
+6. **Run.** With `loginOnStart` checked (default), the login page opens automatically;
    `JiweAuth.OnLoginSuccess` fires once `IdToken` is populated.
 
 ```csharp
@@ -100,7 +136,7 @@ jiweAuth.OnLoginSuccess += () => {
 
 ---
 
-## 4. API reference
+## 5. API reference
 
 All calls are async/callback-based; every result carries `Success` + `Error` (+
 call-specific fields).
@@ -113,7 +149,7 @@ call-specific fields).
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
 | `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
-| `CheckCredentialsValid(onResult)` | No | See §7, forced-update pattern |
+| `CheckCredentialsValid(onResult)` | No | See §8, forced-update pattern |
 
 `transactionId` is auto-generated if omitted. All three reward calls return the same
 `JiweWalletResult { Success, Error, RawResponse }` shape.
@@ -127,11 +163,12 @@ jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking:
 
 ---
 
-## 5. Login flow, per platform
+## 6. Login flow, per platform
 
 `JiweAuth` runs standard OAuth2 Authorization Code + PKCE, but how the browser hands
 control back to your game is inherently different per platform — this is the one part
-of the SDK that can't be unified.
+of the SDK that can't be unified. (For what `redirect_uri` to register for each of
+these, see §3 — decide that *before* your first login test.)
 
 ```mermaid
 sequenceDiagram
@@ -158,35 +195,9 @@ sequenceDiagram
 
 | Platform | Mechanism | Extra setup |
 |---|---|---|
-| Standalone / Editor | Local loopback HTTP listener catches the redirect | None |
-| Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe |
+| Standalone / Editor | Local loopback HTTP listener catches the redirect | Pin the port and register it — see §3 |
+| Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe — see §3 |
 | WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain |
-
-### Redirect URIs — what to put in the "Redirect URIs" field
-
-When you create your application (§9), the form has a **Redirect URIs** field that's
-left blank by default with no platform default shown in the UI. **Jiwe doesn't
-generate or infer this value — you define it yourself in the form**, and it must
-then match, exactly, whatever `redirect_uri` your build actually sends on login:
-
-| Platform | `redirect_uri` the SDK actually sends | Register this |
-|---|---|---|
-| Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login** | Not registerable as-is — see fix below |
-| Android / iOS | `<mobileRedirectScheme>://oauth-callback` — default scheme is `jiwewallet` unless you changed the `mobileRedirectScheme` field on `JiweAuth` | `jiwewallet://oauth-callback` (or your own scheme, kept in sync with the Inspector field) |
-| WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — add both a staging and production entry if you have separate domains |
-
-> **Standalone/Editor as shipped can't be registered, because it's not one fixed
-> value** — `JiweAuth` picks a new free loopback port every login
-> (`GetFreeLoopbackPort()`), and since the redirect URI you register is a value
-> *you* fix once in the form, a moving port can never match it. Before shipping a
-> Standalone/Editor build, pin that method to a single constant port (e.g.
-> `http://127.0.0.1:53682/`) and register that exact string. Skipping this means
-> Standalone/Editor login will fail on every attempt with a redirect_uri mismatch.
-
-The form also has an **"My app will..."** scope checklist — check every scope the SDK
-actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see the
-`Scope` constant in `JiweAuth.cs`). Leaving one unchecked here produces the same
-undiagnosable `access_denied` redirect as a missing `scope` param.
 
 `networkTimeoutSeconds` (default 20s) bounds every step of this flow — a hung browser
 or dead network fails visibly instead of hanging forever. **Always** also wire a
@@ -201,7 +212,7 @@ skipButton.onClick.AddListener(() => {
 
 ---
 
-## 6. Security checklist
+## 7. Security checklist
 
 Real bugs found (and fixed, in this SDK) shipping a live game against Jiwe's actual
 servers — not theoretical advice.
@@ -230,7 +241,7 @@ servers — not theoretical advice.
 
 ---
 
-## 7. Forcing an update via key rotation
+## 8. Forcing an update via key rotation
 
 If you need to push all players to a new build (breaking API change, key
 compromise), rotate `apiUsername`/`apiKey` on Jiwe's side and gate a banner on
@@ -248,24 +259,24 @@ never mistaken for "this build is stale."
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §6 |
-| Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§5) |
+| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §7 |
+| Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§6) |
 | WebGL token exchange fails with a CORS error | Jiwe hasn't allow-listed your hosted domain | Ask Jiwe to whitelist your domain |
 | Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
 | Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
-| Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §5 "Redirect URIs" |
+| Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §3 |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
 Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
 
 ---
 
-## 9. Jiwe IO platform basics
+## 10. Jiwe IO platform basics
 
 Steps outside the SDK itself — registering an account and creating your application.
 
@@ -274,11 +285,10 @@ Steps outside the SDK itself — registering an account and creating your applic
 
 1. Go to [www.jiwe.io](http://www.jiwe.io), sign up, and log in.
 2. Open **Profile** → **My Apps**.
-3. **Create an Application** — this generates the `clientId` / `apiSecret` /
+3. Decide your redirect URIs and scopes first — see §3.
+4. **Create an Application** — this generates the `clientId` / `apiSecret` /
    `apiUsername` / `apiKey` set your game needs (see §2). Create one application
-   per game. When you get to **Redirect URIs** and the scope checklist, see §5 —
-   both are easy to get wrong and fail silently with an undiagnosable
-   `access_denied`.
+   per game.
 
 </details>
 
@@ -293,10 +303,10 @@ Upload directly from the Jiwe IO upload page — no form or manual handoff neede
 
 ## Roadmap
 
-- **Unreal and Godot SDKs.** When they land, §2–4 above (credential model, API
-  surface, security checklist) should carry over almost unchanged — only §5
-  (platform redirect mechanics) is engine-specific and will need its own writeup
-  per engine.
+- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §7, and §8 above
+  (credential model, redirect-URI model, API surface, security checklist) should
+  carry over almost unchanged — only §4 (Quickstart) and §6 (platform redirect
+  mechanics) are engine-specific and will need their own writeup per engine.
 - **Celo wallet / Kotani Pay withdrawal flow.** Partially built — connecting a
   Jiwe wallet to Celo and withdrawing out to M-Pesa via Kotani Pay exists but
   isn't finished end-to-end. Not documented here yet; will get its own section

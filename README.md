@@ -165,23 +165,23 @@ sequenceDiagram
 ### Redirect URIs — what to put in the "Redirect URIs" field
 
 When you create your application (§9), the form has a **Redirect URIs** field that's
-left blank by default — there's no platform default shown in the UI, and it's easy to
-not know what belongs there. This is exactly what each platform's branch above sends
-as `redirect_uri` in the login request, so it has to match what you register:
+left blank by default with no platform default shown in the UI. **Jiwe doesn't
+generate or infer this value — you define it yourself in the form**, and it must
+then match, exactly, whatever `redirect_uri` your build actually sends on login:
 
 | Platform | `redirect_uri` the SDK actually sends | Register this |
 |---|---|---|
-| Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login** | `http://127.0.0.1/` — see caveat below |
+| Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login** | Not registerable as-is — see fix below |
 | Android / iOS | `<mobileRedirectScheme>://oauth-callback` — default scheme is `jiwewallet` unless you changed the `mobileRedirectScheme` field on `JiweAuth` | `jiwewallet://oauth-callback` (or your own scheme, kept in sync with the Inspector field) |
 | WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — add both a staging and production entry if you have separate domains |
 
-> **Standalone/Editor picks a random loopback port on every login**, so it can never
-> match one fixed `redirect_uri` exactly. If Jiwe's server validates `redirect_uri`
-> as an exact string match, Editor testing will fail with a redirect_uri error no
-> matter what you register. Two ways out: ask Jiwe (§8 support contact) whether
-> standalone/editor redirect validation is host-based rather than exact-match, or
-> pin `GetFreeLoopbackPort()` in `JiweAuth.cs` to a fixed port and register that
-> exact `http://127.0.0.1:<port>/` instead.
+> **Standalone/Editor as shipped can't be registered, because it's not one fixed
+> value** — `JiweAuth` picks a new free loopback port every login
+> (`GetFreeLoopbackPort()`), and since the redirect URI you register is a value
+> *you* fix once in the form, a moving port can never match it. Before shipping a
+> Standalone/Editor build, pin that method to a single constant port (e.g.
+> `http://127.0.0.1:53682/`) and register that exact string. Skipping this means
+> Standalone/Editor login will fail on every attempt with a redirect_uri mismatch.
 
 The form also has an **"My app will..."** scope checklist — check every scope the SDK
 actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see the
@@ -258,7 +258,7 @@ never mistaken for "this build is stale."
 | Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
 | Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
-| Login redirect fails / `redirect_uri` error, only in Editor | Standalone/Editor's random loopback port doesn't match a registered exact `redirect_uri` | See the caveat under §5 "Redirect URIs" |
+| Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §5 "Redirect URIs" |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
 Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.

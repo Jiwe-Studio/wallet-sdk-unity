@@ -10,8 +10,8 @@ everything else. Copy `Jiwe/` into `Assets/` and you're done importing.
 > **This doc is Unity-specific.** The concepts below — two credential pairs, the
 > redirect-URI model, the reward/leaderboard API shape, the security rules — are the
 > same on any engine. If you're building the Unreal or Godot SDK next, §2, §3, §5,
-> §7, and §8 are the ones to port; §4 (Quickstart) and §6 (per-platform login
-> mechanics) are Unity/C#-specific.
+> §8, and §9 are the ones to port; §4 (Quickstart), §6 (per-platform login
+> mechanics), and §7 (WebGL export settings) are Unity/C#-specific.
 
 ---
 
@@ -113,12 +113,12 @@ per platform *before* you fill in the form, using what `JiweAuth` actually sends
 > - **Hosting directly on Jiwe IO (not your own domain)?** The redirect URI is
 >   still just "the game's own hosted page," but that now means the page Jiwe
 >   itself gives your game, e.g. `https://jiwe.io/games/your-game-slug` — not a
->   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§9) if
+>   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§10) if
 >   it isn't decided yet, since you can't register it until you know it. It must
 >   match byte-for-byte: no trailing slash, no query string.
 > - **CORS is a separate ask from redirect_uri registration.** Registering a URL
 >   here does not also whitelist it for the browser-side token-exchange request —
->   ask Jiwe (§9) to CORS-whitelist every domain you just registered, at the same
+>   ask Jiwe (§10) to CORS-whitelist every domain you just registered, at the same
 >   time, so you don't rediscover this domain-by-domain as each environment goes
 >   live.
 
@@ -143,9 +143,12 @@ alongside your redirect URIs, not after a failed login.
 4. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
    `JiweWallet` to it, and drag the `JiweAuth` component into `JiweWallet.auth`.
 5. **Fill in credentials** on the two components (see the table in §2). Do this via a
-   gitignored config asset, not hardcoded — see §7.
+   gitignored config asset, not hardcoded — see §8.
 6. **Run.** With `loginOnStart` checked (default), the login page opens automatically;
    `JiweAuth.OnLoginSuccess` fires once `IdToken` is populated.
+7. **Building for WebGL?** Set your export/compression settings per §7 before your
+   first upload — a wrong Compression Format is the single most common reason a
+   build "uploads fine" but shows a blank page.
 
 ```csharp
 jiweAuth.OnLoginSuccess += () => {
@@ -171,7 +174,7 @@ call-specific fields).
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
 | `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
-| `CheckCredentialsValid(onResult)` | No | See §8, forced-update pattern |
+| `CheckCredentialsValid(onResult)` | No | See §9, forced-update pattern |
 
 `transactionId` is auto-generated if omitted. All three reward calls return the same
 `JiweWalletResult { Success, Error, RawResponse }` shape.
@@ -219,7 +222,7 @@ sequenceDiagram
 |---|---|---|
 | Standalone / Editor | Local loopback HTTP listener catches the redirect | Pin the port and register it — see §3 |
 | Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe — see §3 |
-| WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain |
+| WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain; also see §7 for export settings |
 
 `networkTimeoutSeconds` (default 20s) bounds every step of this flow — a hung browser
 or dead network fails visibly instead of hanging forever. **Always** also wire a
@@ -234,7 +237,72 @@ skipButton.onClick.AddListener(() => {
 
 ---
 
-## 7. Security checklist
+## 7. WebGL export settings for Jiwe hosting
+
+Before uploading a WebGL build to Jiwe hosting, set these in **Edit → Project
+Settings → Player → WebGL → Publishing Settings**:
+
+| Setting | Required value | Why |
+|---|---|---|
+| Compression Format | `Disabled` | Both compressed options have real, hosting-breaking failure modes — see below |
+| Decompression Fallback | `Off` | Not needed once compression is disabled |
+
+Yes, this makes the build bigger (uncompressed `.data`/`.wasm`/`.framework.js`
+instead of the ~30%-smaller compressed versions). That's a deliberate tradeoff, not
+an oversight — see why below.
+
+### Why not compression?
+
+Unity offers two ways to compress WebGL output, and both have real,
+hosting-breaking failure modes confirmed firsthand:
+
+1. **Server-side `Content-Encoding`** (`Compression Format = Gzip`/`Brotli`,
+   `Decompression Fallback = Off`) — Unity's compressed output uses a `.unityweb`
+   extension, but the bytes on the wire aren't raw gzip/brotli; they're wrapped in
+   Unity's own proprietary format (the literal string `"UnityWeb Compressed
+   Content (brotli)"` at the start of the file). If a host sets
+   `Content-Encoding: gzip`/`br` for these files — an easy default for any generic
+   static host to apply automatically based on the "compressed-looking" filename —
+   the browser tries to transport-decode a stream that isn't valid gzip/brotli and
+   fails outright (`net::ERR_CONTENT_DECODING_FAILED`), which cascades into
+   `unityFramework is not defined`. Nothing errors on upload; the player just gets
+   a blank page.
+2. **Decompression Fallback** (`Compression Format = Gzip`/`Brotli`,
+   `Decompression Fallback = On`) — meant to be the safe option: Unity bundles its
+   own JS decompressor into `loader.js`, no server config needed. Confirmed
+   unreliable in Unity `6000.0.41f1` — the JS-side decompressor throws
+   (`Cannot read properties of undefined (reading 'match')`) partway through the
+   framework/wasm response, silently preventing `.data` from ever loading.
+   Reproduced identically on a real hosted deploy and a clean local test — a
+   genuine engine-version bug, not a hosting misconfiguration. Worth re-testing on
+   later Unity versions before trusting this setting again.
+
+`Compression Disabled` sidesteps both: no wrapper format, no JS decompressor,
+nothing for a host or browser to get wrong. Bigger download, but it actually loads.
+
+### If a build "uploads fine but shows a blank page or endless loading bar"
+
+This is the standard symptom for both failure modes above, and it won't surface on
+the upload/hosting side — only in the player's browser console once someone
+actually opens the game.
+
+1. Open the hosted URL in a real desktop browser, open DevTools → Console.
+2. `net::ERR_CONTENT_DECODING_FAILED` or `unityFramework is not defined` → the host
+   is setting `Content-Encoding` on `.unityweb` files it shouldn't. Fix: rebuild
+   with `Compression Disabled` — don't try to fix it at the hosting layer.
+3. Check the Network tab: does `<name>.data`/`.data.unityweb` ever get requested?
+   If framework and wasm load but `.data` never does, and there's an uncaught
+   promise rejection in `loader.js` — that's the Decompression Fallback bug. Fix:
+   rebuild with `Compression Disabled`.
+4. If neither applies and the build has **Thread Support** on (check Player
+   Settings, or look for `SharedArrayBuffer` in `loader.js`), confirm the hosting
+   route sends both `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp` — missing either silently breaks
+   thread startup the same way.
+
+---
+
+## 8. Security checklist
 
 Real bugs found (and fixed, in this SDK) shipping a live game against Jiwe's actual
 servers — not theoretical advice.
@@ -263,7 +331,7 @@ servers — not theoretical advice.
 
 ---
 
-## 8. Forcing an update via key rotation
+## 9. Forcing an update via key rotation
 
 If you need to push all players to a new build (breaking API change, key
 compromise), rotate `apiUsername`/`apiKey` on Jiwe's side and gate a banner on
@@ -281,24 +349,25 @@ never mistaken for "this build is stale."
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §7 |
+| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §8 |
 | Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§6) |
 | WebGL token exchange fails with a CORS error | Jiwe hasn't allow-listed your hosted domain | Ask Jiwe to whitelist your domain |
 | Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
 | Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
 | Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §3 |
+| WebGL build "uploads fine" but shows a blank page / endless loading bar | Compression Format not Disabled, or (threaded builds only) missing COOP/COEP headers | See §7 |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
 Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
 
 ---
 
-## 10. Jiwe IO platform basics
+## 11. Jiwe IO platform basics
 
 Steps outside the SDK itself — registering an account and creating your application.
 
@@ -317,7 +386,8 @@ Steps outside the SDK itself — registering an account and creating your applic
 <details>
 <summary>Uploading your game to Jiwe IO</summary>
 
-Upload directly from the Jiwe IO upload page — no form or manual handoff needed.
+Upload directly from the Jiwe IO upload page — no form or manual handoff needed. If
+you're on WebGL, see §7 before your first upload.
 
 </details>
 
@@ -325,10 +395,12 @@ Upload directly from the Jiwe IO upload page — no form or manual handoff neede
 
 ## Roadmap
 
-- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §7, and §8 above
+- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §8, and §9 above
   (credential model, redirect-URI model, API surface, security checklist) should
-  carry over almost unchanged — only §4 (Quickstart) and §6 (platform redirect
-  mechanics) are engine-specific and will need their own writeup per engine.
+  carry over almost unchanged — only §4 (Quickstart), §6 (platform redirect
+  mechanics), and §7 (WebGL export settings, if the target engine ships a WebGL
+  exporter with similar tradeoffs) are engine-specific and will need their own
+  writeup per engine.
 - **Celo wallet / Kotani Pay withdrawal flow.** Partially built — connecting a
   Jiwe wallet to Celo and withdrawing out to M-Pesa via Kotani Pay exists but
   isn't finished end-to-end. Not documented here yet; will get its own section

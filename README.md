@@ -88,7 +88,7 @@ per platform *before* you fill in the form, using what `JiweAuth` actually sends
 |---|---|---|
 | Standalone / Editor | `http://127.0.0.1:<random port>/` — a **new free port every login**, as shipped | Not registerable as-is — see fix below |
 | Android / iOS | `<mobileRedirectScheme>://oauth-callback` — default scheme is `jiwewallet` unless you changed the `mobileRedirectScheme` field on `JiweAuth` | `jiwewallet://oauth-callback` (or your own scheme, kept in sync with the Inspector field) |
-| WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — add both a staging and production entry if you have separate domains |
+| WebGL | Your hosted game's own page URL, no query string (e.g. `https://yourgame.com/play`) | That exact hosted URL — one entry **per environment** (local/staging/production), see note below |
 
 > **Standalone/Editor as shipped can't be registered, because it's not one fixed
 > value** — `JiweAuth` picks a new free loopback port every login
@@ -99,6 +99,22 @@ per platform *before* you fill in the form, using what `JiweAuth` actually sends
 > Skipping this means Standalone/Editor login fails on every attempt with a
 > redirect_uri mismatch — it isn't optional or Editor-only-a-quirk, it's required
 > for that platform to work at all.
+
+> **WebGL doesn't have Standalone's random-port problem — your hosted URL is
+> already one fixed value — but you almost certainly deploy to more than one
+> URL**, and each needs its own exact entry in the same Redirect URIs field
+> (it accepts a comma-separated list — see the form's own placeholder text):
+> - **Local testing**: whatever serves your local WebGL build must also be a
+>   **fixed, predictable URL** (e.g. always `http://localhost:8000/`), or you're
+>   back to the same moving-target problem Standalone has — pick one local dev
+>   server/port and stick to it rather than letting it float.
+> - **Staging and production**: register both, as separate exact entries, the
+>   moment you know those domains — not just production.
+> - **CORS is a separate ask from redirect_uri registration.** Registering a URL
+>   here does not also whitelist it for the browser-side token-exchange request —
+>   ask Jiwe (§9) to CORS-whitelist every domain you just registered, at the same
+>   time, so you don't rediscover this domain-by-domain as each environment goes
+>   live.
 
 The same form also has an **"My app will..."** scope checklist — check every scope
 the SDK actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see

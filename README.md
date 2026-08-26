@@ -369,6 +369,26 @@ below are starting points, not something the SDK bakes in.
 [Serializable] class Announcement { public string id; public string message; public string expiresAt; }
 ```
 
+Both patterns below read the same blob at launch, before login starts:
+
+```mermaid
+flowchart TD
+    Start([Game launches]) --> Fetch["GetGameData()"]
+    Fetch -- "fails / timeout" --> Proceed
+    Fetch -- success --> Parse["Parse RawResponse\ninto MyGameData"]
+    Parse --> VerCheck{"minClientVersion\n> MyBuildVersion?"}
+    VerCheck -- yes --> Block["Show update banner\n(§9 has the alternative:\nkey-rotation, all builds at once)"]
+    VerCheck -- no --> AnnCheck{"announcement.id new\nand not expired?"}
+    AnnCheck -- yes --> ShowAnn["Show announcement banner,\nsave id to PlayerPrefs"]
+    AnnCheck -- no --> Proceed
+    ShowAnn --> Proceed(["JiweAuth.Login()"])
+```
+
+Every failure path in this diagram — a network blip, a missing key, a malformed
+response — should land on the same branch as "fails/timeout": proceed to login
+as normal. Only a *definitive* value that says "you're behind" should ever block
+anything, same reasoning as `CheckCredentialsValid` in §9.
+
 ### Minimum-version gate
 
 A graduated alternative to key rotation (§9): bump `minClientVersion` in Game Data

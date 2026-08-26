@@ -15,10 +15,10 @@ namespace Jiwe
     ///   - Reward calls (XP / points / airtime) credit a specific PLAYER's
     ///     account, so they need that player logged in via JiweAuth — the
     ///     X-API-TOKEN header is their id_token.
-    ///   - Everything else (leaderboard, wallet balance, transaction status)
-    ///     is scoped to YOUR app, not a specific player, and only needs the
-    ///     static X-API-USERNAME/X-API-KEY pair below — no login required,
-    ///     so these work even before a player has logged in.
+    ///   - Everything else (leaderboard, wallet balance, transaction status,
+    ///     Game Data) is scoped to YOUR app, not a specific player, and only
+    ///     needs the static X-API-USERNAME/X-API-KEY pair below — no login
+    ///     required, so these work even before a player has logged in.
     ///
     /// Note: there is no "Purchase" (charge-the-player) endpoint in the
     /// current API docs — the previous SDK's Purchase() call had no
@@ -117,6 +117,29 @@ namespace Jiwe
             onResult?.Invoke(req.responseCode != 401 && req.responseCode != 403);
         }
 
+        /// <summary>
+        /// Raw read access to your app's Game Data — an app-scoped JSON key/value blob (no player
+        /// login needed), for anything the game should react to without shipping a new build: a
+        /// minimum-supported-version gate, an in-game announcement, a feature flag, etc. Deliberately
+        /// schema-less here — define your own [Serializable] class for whatever you store and parse
+        /// RawResponse yourself with JsonUtility.FromJson&lt;T&gt;. See the README's "Game Data
+        /// patterns" section for worked examples (version gate, announcement banner).
+        /// </summary>
+        public void GetGameData(Action<JiweWalletResult> onComplete)
+        {
+            StartCoroutine(GetGameDataCoroutine(onComplete));
+        }
+
+        /// <summary>
+        /// Writes to your app's Game Data. Confirmed live: updates merge/patch rather than replace —
+        /// sending a JSON object only touches the keys you include, so set a field to null explicitly
+        /// to clear it rather than expecting an empty payload to wipe existing data.
+        /// </summary>
+        public void SetGameData(string jsonPayload, Action<JiweWalletResult> onComplete)
+        {
+            StartCoroutine(SetGameDataCoroutine(jsonPayload, onComplete));
+        }
+
         // -----------------------------------------------------------------
         // Requests
         // -----------------------------------------------------------------
@@ -192,6 +215,55 @@ namespace Jiwe
 
             var response = JsonUtility.FromJson<LeaderboardResponse>(req.downloadHandler.text);
             onComplete?.Invoke(new JiweLeaderboardResult { Success = true, Entries = response.leaderboard ?? Array.Empty<JiweLeaderboardEntry>() });
+        }
+
+        private IEnumerator GetGameDataCoroutine(Action<JiweWalletResult> onComplete)
+        {
+            using var req = UnityWebRequest.Get($"{BaseUrl}/metadata/game-data");
+            req.timeout = NetworkTimeoutSeconds;
+            ApplyStaticHeaders(req);
+            yield return req.SendWebRequest();
+
+            bool success = req.result == UnityWebRequest.Result.Success;
+            onComplete?.Invoke(new JiweWalletResult
+            {
+                Success = success,
+                Error = success ? null : req.error,
+                RawResponse = req.downloadHandler.text
+            });
+        }
+
+        private IEnumerator SetGameDataCoroutine(string jsonPayload, Action<JiweWalletResult> onComplete)
+        {
+            // Confirmed live: the write path is /metadata/update/game-data, not /metadata/game-data —
+            // Jiwe's own endpoint docs list only the latter for both read and write, but POSTing there
+            // doesn't apply the update. It also requires X-API-KEY in addition to X-API-USERNAME (Jiwe's
+            // docs list X-API-USERNAME only) — ApplyStaticHeaders already sends both on every call, so
+            // this is handled automatically, not something you need to add here.
+            using var req = new UnityWebRequest($"{BaseUrl}/metadata/update/game-data", "POST");
+            req.timeout = NetworkTimeoutSeconds;
+            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(jsonPayload));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            ApplyStaticHeaders(req);
+
+            yield return req.SendWebRequest();
+
+            bool success = req.result == UnityWebRequest.Result.Success;
+            string message = null;
+            if (!string.IsNullOrEmpty(req.downloadHandler.text))
+            {
+                var parsed = JsonUtility.FromJson<GenericResponse>(req.downloadHandler.text);
+                message = parsed?.message;
+                if (parsed != null && parsed.type == "ERROR") success = false;
+            }
+
+            onComplete?.Invoke(new JiweWalletResult
+            {
+                Success = success,
+                Error = success ? null : (message ?? req.error),
+                RawResponse = req.downloadHandler.text
+            });
         }
 
         private void ApplyStaticHeaders(UnityWebRequest req)

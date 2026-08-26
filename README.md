@@ -8,10 +8,11 @@ Two scripts, no dependencies: `JiweAuth.cs` handles login, `JiweWallet.cs` handl
 everything else. Copy `Jiwe/` into `Assets/` and you're done importing.
 
 > **This doc is Unity-specific.** The concepts below — two credential pairs, the
-> redirect-URI model, the reward/leaderboard API shape, the security rules — are the
-> same on any engine. If you're building the Unreal or Godot SDK next, §2, §3, §5,
-> §8, and §9 are the ones to port; §4 (Quickstart), §6 (per-platform login
-> mechanics), and §7 (WebGL export settings) are Unity/C#-specific.
+> redirect-URI model, the reward/leaderboard API shape, the security rules, the
+> Game Data patterns — are the same on any engine. If you're building the Unreal
+> or Godot SDK next, §2, §3, §5, §8, §9, and §10 are the ones to port; §4
+> (Quickstart), §6 (per-platform login mechanics), and §7 (WebGL export settings)
+> are Unity/C#-specific.
 
 ---
 
@@ -347,9 +348,96 @@ This reports `false` **only** on a definitive 401/403 (credentials actively
 rejected) — a network blip, timeout, or 5xx reports `true`, so a transient outage is
 never mistaken for "this build is stale."
 
+Key rotation is deliberately blunt: the moment you rotate, **every build ever
+shipped** breaks at once — there's no way to let recent-but-not-latest builds keep
+working. That bluntness is exactly the point for revoking a leaked key. If you
+want graduated control instead (e.g. "builds below version 7 must update, 7 and
+above are fine"), see §10 for a version-gate built on Game Data instead — the two
+approaches are complementary, not competing; use whichever matches the situation.
+
 ---
 
-## 10. Troubleshooting
+## 10. Game Data patterns
+
+`JiweWallet.GetGameData`/`SetGameData` give you raw read/write access to an
+app-scoped JSON blob — no player login needed, no schema enforced by the SDK.
+What you store and how you interpret it is entirely up to you; the two patterns
+below are starting points, not something the SDK bakes in.
+
+```csharp
+[Serializable] class MyGameData { public int minClientVersion; public Announcement announcement; }
+[Serializable] class Announcement { public string id; public string message; public string expiresAt; }
+```
+
+### Minimum-version gate
+
+A graduated alternative to key rotation (§9): bump `minClientVersion` in Game Data
+whenever you want to force an update, and compare it against a version constant
+baked into each build. Unlike key rotation, this doesn't touch your working API
+credentials, and it lets you draw the line at an exact version instead of "every
+build before right now."
+
+```csharp
+const int MyBuildVersion = 7;
+
+jiweWallet.GetGameData(result => {
+    if (!result.Success) return; // fail OPEN — a network blip should never look like "must update"
+    var data = JsonUtility.FromJson<MyGameData>(result.RawResponse);
+    if (data.minClientVersion > MyBuildVersion) ShowUpdateBanner();
+});
+```
+
+Run this before `JiweAuth.Login()` fires, not after — it's app-scoped, so there's
+no reason to send a player through a full login round-trip only to reject them
+afterward. Fail open on any error (missing data, timeout, malformed response) —
+the same reasoning as `CheckCredentialsValid` (§9): a transient failure should
+never be mistaken for "this build is stale."
+
+### Announcement banner
+
+Same Game Data blob, a different field — an in-game message an admin can change
+without a build, e.g. "double XP weekend live now."
+
+```csharp
+jiweWallet.GetGameData(result => {
+    if (!result.Success) return;
+    var data = JsonUtility.FromJson<MyGameData>(result.RawResponse);
+    var a = data.announcement;
+    if (a == null || a.id == PlayerPrefs.GetString("lastSeenAnnouncement", "")) return;
+    if (!string.IsNullOrEmpty(a.expiresAt) && DateTime.UtcNow > DateTime.Parse(a.expiresAt)) return;
+
+    ShowAnnouncement(a.message);
+    PlayerPrefs.SetString("lastSeenAnnouncement", a.id);
+});
+```
+
+- **"Have I shown this already?" is tracked locally** (`PlayerPrefs`), not on
+  Jiwe — it's a per-device concern, not something that needs the player's own
+  User Data or even a completed login.
+- **`expiresAt` is optional but recommended** — if an admin forgets to clear an
+  old announcement after an event ends, it silently stops showing instead of
+  nagging players indefinitely. Plain client-side date comparison, no server
+  logic involved.
+- **Non-blocking by design** — a dismissible banner, not something that stops
+  the player from doing anything else, consistent with §8's degrade-gracefully
+  approach to failures generally.
+- This is **not a push notification** — it only reaches a player who has the
+  game open and happens to read Game Data at that moment. There's no way to
+  reach someone who isn't currently running the game.
+
+### Writing Game Data
+
+There's currently no non-technical way to edit Game Data from Jiwe's dashboard —
+setting `minClientVersion` or `announcement` means calling `POST
+/rest/api/v1/metadata/update/game-data` directly (e.g. from Postman), with
+`X-API-USERNAME`/`X-API-KEY` headers, the same pair `JiweWallet` uses. Updates
+merge/patch rather than replace — sending `{"announcement": {...}}` doesn't
+clear `minClientVersion` or vice versa, but if you need to remove a field
+entirely rather than change it, set it to `null` explicitly.
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -367,7 +455,7 @@ Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
 
 ---
 
-## 11. Jiwe IO platform basics
+## 12. Jiwe IO platform basics
 
 Steps outside the SDK itself — registering an account and creating your application.
 
@@ -395,12 +483,15 @@ you're on WebGL, see §7 before your first upload.
 
 ## Roadmap
 
-- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §8, and §9 above
-  (credential model, redirect-URI model, API surface, security checklist) should
-  carry over almost unchanged — only §4 (Quickstart), §6 (platform redirect
-  mechanics), and §7 (WebGL export settings, if the target engine ships a WebGL
-  exporter with similar tradeoffs) are engine-specific and will need their own
-  writeup per engine.
+- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §8, §9, and §10 above
+  (credential model, redirect-URI model, API surface, security checklist, Game
+  Data patterns) should carry over almost unchanged — only §4 (Quickstart), §6
+  (platform redirect mechanics), and §7 (WebGL export settings, if the target
+  engine ships a WebGL exporter with similar tradeoffs) are engine-specific and
+  will need their own writeup per engine.
+- **A non-technical way to edit Game Data.** Right now setting `minClientVersion`
+  or `announcement` (§10) means a dev hand-crafting a Postman request — fine for
+  occasional use, but worth a real dashboard control if this becomes routine.
 - **Celo wallet / Kotani Pay withdrawal flow.** Partially built — connecting a
   Jiwe wallet to Celo and withdrawing out to M-Pesa via Kotani Pay exists but
   isn't finished end-to-end. Not documented here yet; will get its own section

@@ -114,20 +114,31 @@ per platform *before* you fill in the form, using what `JiweAuth` actually sends
 > - **Hosting directly on Jiwe IO (not your own domain)?** The redirect URI is
 >   still just "the game's own hosted page," but that now means the page Jiwe
 >   itself gives your game, e.g. `https://jiwe.io/games/your-game-slug` — not a
->   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§10) if
+>   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§11) if
 >   it isn't decided yet, since you can't register it until you know it. It must
 >   match byte-for-byte: no trailing slash, no query string.
 > - **CORS is a separate ask from redirect_uri registration.** Registering a URL
 >   here does not also whitelist it for the browser-side token-exchange request —
->   ask Jiwe (§10) to CORS-whitelist every domain you just registered, at the same
+>   ask Jiwe (§11) to CORS-whitelist every domain you just registered, at the same
 >   time, so you don't rediscover this domain-by-domain as each environment goes
 >   live.
+> - **Don't confuse this field with "Website."** The form also has a separate
+>   **Website** field (your Jiwe profile page, e.g. `https://jiwe.io/profile/your-name`,
+>   or your studio site) — that's unrelated to login and never needs to match
+>   anything your build sends. Only **Redirect URIs** has to match `redirect_uri`
+>   byte-for-byte.
 
 The same form also has an **"My app will..."** scope checklist — check every scope
 the SDK actually requests (`openid`, `profile`, `in-app-purchases`, `rewards`; see
 the `Scope` constant in `JiweAuth.cs`). Leaving one unchecked produces the same
 undiagnosable `access_denied` redirect as a missing `scope` param — decide this
-alongside your redirect URIs, not after a failed login.
+alongside your redirect URIs, not after a failed login. **The checkboxes don't
+show the raw scope names** — `openid`/`profile` are labeled plainly ("Identify
+and log in users" / "Read the user's name and avatar," both marked `required`),
+but `in-app-purchases` and `rewards` both appear as separate `legacy`-tagged
+checkboxes reading **"Include the user's wallet ID in the token"** — check both
+of those too, not just the two `required` ones, or reward calls will fail even
+though login succeeds.
 
 ---
 

@@ -8,11 +8,11 @@ Two scripts, no dependencies: `JiweAuth.cs` handles login, `JiweWallet.cs` handl
 everything else. Copy `Jiwe/` into `Assets/` and you're done importing.
 
 > **This doc is Unity-specific.** The concepts below — two credential pairs, the
-> redirect-URI model, the reward/leaderboard API shape, the security rules, the
-> Game Data patterns — are the same on any engine. If you're building the Unreal
-> or Godot SDK next, §2, §3, §5, §8, §9, and §10 are the ones to port; §4
-> (Quickstart), §6 (per-platform login mechanics), and §7 (WebGL export settings)
-> are Unity/C#-specific.
+> redirect-URI model, the reward/leaderboard/purchase API shape, the security
+> rules, the Game Data patterns — are the same on any engine. If you're building
+> the Unreal or Godot SDK next, §2, §3, §5, §6, §9, §10, and §11 are the ones to
+> port; §4 (Quickstart), §7 (per-platform login mechanics), and §8 (WebGL export
+> settings) are Unity/C#-specific.
 
 ---
 
@@ -66,14 +66,16 @@ flowchart TB
         R1["GiveXpReward"]
         R2["GivePointsReward"]
         R3["GiveAirtimeReward"]
+        R4["PurchaseWithWallet"]
     end
     Static(["apiUsername / apiKey only"]) --> NoLoginNeeded
     Token(["apiUsername / apiKey\n+ player IdToken"]) --> LoginRequired
 ```
 
-There is **no purchase (charge-the-player) endpoint** in the current API — an older
-SDK's `Purchase()` call has no live equivalent and was removed rather than left
-pointing at a dead host.
+Unlike an older version of this SDK, there **is now** a real purchase (charge-the-
+player) endpoint — `PurchaseWithWallet`, debiting the player's own Jiwe balance.
+See §6 for the full flow; it has a real double-charge footgun if you get the retry
+handling wrong, so it's worth reading before you wire it up.
 
 ---
 
@@ -114,12 +116,12 @@ per platform *before* you fill in the form, using what `JiweAuth` actually sends
 > - **Hosting directly on Jiwe IO (not your own domain)?** The redirect URI is
 >   still just "the game's own hosted page," but that now means the page Jiwe
 >   itself gives your game, e.g. `https://jiwe.io/games/your-game-slug` — not a
->   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§11) if
+>   `/callback` route you invent. Confirm the exact URL/slug with Jiwe (§12) if
 >   it isn't decided yet, since you can't register it until you know it. It must
 >   match byte-for-byte: no trailing slash, no query string.
 > - **CORS is a separate ask from redirect_uri registration.** Registering a URL
 >   here does not also whitelist it for the browser-side token-exchange request —
->   ask Jiwe (§11) to CORS-whitelist every domain you just registered, at the same
+>   ask Jiwe (§12) to CORS-whitelist every domain you just registered, at the same
 >   time, so you don't rediscover this domain-by-domain as each environment goes
 >   live.
 > - **Don't confuse this field with "Website."** The form also has a separate
@@ -155,10 +157,10 @@ though login succeeds.
 4. **Wire it up.** Create an empty GameObject ("JiweSDK"), add both `JiweAuth` and
    `JiweWallet` to it, and drag the `JiweAuth` component into `JiweWallet.auth`.
 5. **Fill in credentials** on the two components (see the table in §2). Do this via a
-   gitignored config asset, not hardcoded — see §8.
+   gitignored config asset, not hardcoded — see §9.
 6. **Run.** With `loginOnStart` checked (default), the login page opens automatically;
    `JiweAuth.OnLoginSuccess` fires once `IdToken` is populated.
-7. **Building for WebGL?** Set your export/compression settings per §7 before your
+7. **Building for WebGL?** Set your export/compression settings per §8 before your
    first upload — a wrong Compression Format is the single most common reason a
    build "uploads fine" but shows a blank page.
 
@@ -183,10 +185,12 @@ call-specific fields).
 | `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | XP has no monetary value |
 | `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | "Cowrie" — Jiwe's in-game currency |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Min. 5 units; credits real airtime |
+| `PurchaseWithWallet(amount, itemId, description, idempotencyKey, onComplete)` | Yes | Debits the player's own balance — see §6, `idempotencyKey` is not optional |
+| `GetPurchaseStatus(paymentOrderId, onComplete)` | Yes | Poll a purchase by the `PaymentOrderId` from a purchase result |
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
 | `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
-| `CheckCredentialsValid(onResult)` | No | See §9, forced-update pattern |
+| `CheckCredentialsValid(onResult)` | No | See §10, forced-update pattern |
 
 `transactionId` is auto-generated if omitted. All three reward calls return the same
 `JiweWalletResult { Success, Error, RawResponse }` shape.
@@ -200,7 +204,68 @@ jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking:
 
 ---
 
-## 6. Login flow, per platform
+## 6. In-app purchases
+
+`PurchaseWithWallet` debits the logged-in player's **own** Jiwe balance for an
+in-game item — a real purchase endpoint, unlike an older version of this SDK
+which had none. Per Jiwe's docs: *"A purchase never partially applies. If
+anything fails, no money moves."*
+
+**The one thing that matters here: `idempotencyKey` is not optional, and reusing
+it correctly is the difference between a safe retry and a real double charge.**
+
+```mermaid
+sequenceDiagram
+    participant Game
+    participant Jiwe as abacus.jiwe.io
+
+    Game->>Game: Generate idempotencyKey ONCE, persist it locally
+    Game->>Jiwe: POST /purchases/wallet (Idempotency-Key: <key>)
+    alt Clean response
+        Jiwe-->>Game: { status: "POSTED", payment_order_id, ... }
+        Game->>Game: Clear the stored key — this purchase is settled
+    else Timeout / dropped connection / crash mid-call
+        Game->>Game: Outcome UNKNOWN — do NOT generate a new key
+        Note over Game: On next attempt (retry button, next launch, etc.)
+        Game->>Jiwe: Retry POST /purchases/wallet (SAME Idempotency-Key)
+        Jiwe-->>Game: The ORIGINAL purchase result — no second charge
+    end
+```
+
+```csharp
+string idempotencyKey = PlayerPrefs.GetString("pendingPurchaseKey", "");
+if (string.IsNullOrEmpty(idempotencyKey)) {
+    idempotencyKey = Guid.NewGuid().ToString();
+    PlayerPrefs.SetString("pendingPurchaseKey", idempotencyKey);
+    PlayerPrefs.Save(); // persist BEFORE the network call — a crash mid-purchase must not lose this
+}
+
+jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula skin", idempotencyKey, result => {
+    if (result.Success) {
+        PlayerPrefs.DeleteKey("pendingPurchaseKey"); // settled — safe to generate a fresh key next time
+        UnlockItem(result.ItemId);
+    } else {
+        // Don't clear the key here — the purchase's true state may still be unknown to the client.
+        // Retry later by calling PurchaseWithWallet again with this SAME idempotencyKey.
+        ShowPurchaseFailed(result.Error);
+    }
+});
+```
+
+- **Generate the key once, before the first attempt** — not inside a retry
+  helper, not fresh on every call. If you regenerate it per attempt, a timeout
+  followed by a retry becomes two separate purchases.
+- **Persist it to disk before the network call**, not just in memory — a crash
+  or force-quit between "purchase sent" and "response received" is exactly the
+  case this exists to protect against.
+- **`RequiresApproval: true` or `Status: "PENDING"`** means the purchase isn't
+  finalized yet — don't unlock the item on `Success` alone; poll
+  `GetPurchaseStatus(result.PaymentOrderId, ...)` until `Status == "POSTED"`.
+- Max 200 characters for the key value.
+
+---
+
+## 7. Login flow, per platform
 
 `JiweAuth` runs standard OAuth2 Authorization Code + PKCE, but how the browser hands
 control back to your game is inherently different per platform — this is the one part
@@ -234,7 +299,7 @@ sequenceDiagram
 |---|---|---|
 | Standalone / Editor | Local loopback HTTP listener catches the redirect | Pin the port and register it — see §3 |
 | Android / iOS | System browser → custom URI scheme (`mobileRedirectScheme`) reopens the app | Register that redirect URI with Jiwe — see §3 |
-| WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain; also see §7 for export settings |
+| WebGL | Jiwe redirects back to your **same hosted page** with `?code=...`; page reloads and resumes | Jiwe must allow CORS from your hosted domain; also see §8 for export settings |
 
 `networkTimeoutSeconds` (default 20s) bounds every step of this flow — a hung browser
 or dead network fails visibly instead of hanging forever. **Always** also wire a
@@ -249,7 +314,7 @@ skipButton.onClick.AddListener(() => {
 
 ---
 
-## 7. WebGL export settings for Jiwe hosting
+## 8. WebGL export settings for Jiwe hosting
 
 Before uploading a WebGL build to Jiwe hosting, set these in **Edit → Project
 Settings → Player → WebGL → Publishing Settings**:
@@ -314,7 +379,7 @@ actually opens the game.
 
 ---
 
-## 8. Security checklist
+## 9. Security checklist
 
 Real bugs found (and fixed, in this SDK) shipping a live game against Jiwe's actual
 servers — not theoretical advice.
@@ -343,7 +408,7 @@ servers — not theoretical advice.
 
 ---
 
-## 9. Forcing an update via key rotation
+## 10. Forcing an update via key rotation
 
 If you need to push all players to a new build (breaking API change, key
 compromise), rotate `apiUsername`/`apiKey` on Jiwe's side and gate a banner on
@@ -363,12 +428,12 @@ Key rotation is deliberately blunt: the moment you rotate, **every build ever
 shipped** breaks at once — there's no way to let recent-but-not-latest builds keep
 working. That bluntness is exactly the point for revoking a leaked key. If you
 want graduated control instead (e.g. "builds below version 7 must update, 7 and
-above are fine"), see §10 for a version-gate built on Game Data instead — the two
+above are fine"), see §11 for a version-gate built on Game Data instead — the two
 approaches are complementary, not competing; use whichever matches the situation.
 
 ---
 
-## 10. Game Data patterns
+## 11. Game Data patterns
 
 `JiweWallet.GetGameData`/`SetGameData` give you raw read/write access to an
 app-scoped JSON blob — no player login needed, no schema enforced by the SDK.
@@ -412,7 +477,7 @@ flowchart TD
     Fetch -- "fails / timeout" --> Proceed
     Fetch -- success --> Parse["Parse RawResponse\ninto MyGameDataResponse,\nread .gameData"]
     Parse --> VerCheck{"minClientVersion\n> MyBuildVersion?"}
-    VerCheck -- yes --> Block["Show update banner\n(§9 has the alternative:\nkey-rotation, all builds at once)"]
+    VerCheck -- yes --> Block["Show update banner\n(§10 has the alternative:\nkey-rotation, all builds at once)"]
     VerCheck -- no --> AnnCheck{"announcement.id new\nand not expired?"}
     AnnCheck -- yes --> ShowAnn["Show announcement banner,\nsave id to PlayerPrefs"]
     AnnCheck -- no --> Proceed
@@ -422,11 +487,11 @@ flowchart TD
 Every failure path in this diagram — a network blip, a missing key, a malformed
 response — should land on the same branch as "fails/timeout": proceed to login
 as normal. Only a *definitive* value that says "you're behind" should ever block
-anything, same reasoning as `CheckCredentialsValid` in §9.
+anything, same reasoning as `CheckCredentialsValid` in §10.
 
 ### Minimum-version gate
 
-A graduated alternative to key rotation (§9): bump `minClientVersion` in Game Data
+A graduated alternative to key rotation (§10): bump `minClientVersion` in Game Data
 whenever you want to force an update, and compare it against a version constant
 baked into each build. Unlike key rotation, this doesn't touch your working API
 credentials, and it lets you draw the line at an exact version instead of "every
@@ -445,7 +510,7 @@ jiweWallet.GetGameData(result => {
 Run this before `JiweAuth.Login()` fires, not after — it's app-scoped, so there's
 no reason to send a player through a full login round-trip only to reject them
 afterward. Fail open on any error (missing data, timeout, malformed response) —
-the same reasoning as `CheckCredentialsValid` (§9): a transient failure should
+the same reasoning as `CheckCredentialsValid` (§10): a transient failure should
 never be mistaken for "this build is stale."
 
 ### Announcement banner
@@ -474,7 +539,7 @@ jiweWallet.GetGameData(result => {
   nagging players indefinitely. Plain client-side date comparison, no server
   logic involved.
 - **Non-blocking by design** — a dismissible banner, not something that stops
-  the player from doing anything else, consistent with §8's degrade-gracefully
+  the player from doing anything else, consistent with §9's degrade-gracefully
   approach to failures generally.
 - This is **not a push notification** — it only reaches a player who has the
   game open and happens to read Game Data at that moment. There's no way to
@@ -498,25 +563,26 @@ real request before relying on it in production.
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §8 |
-| Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§6) |
+| `invalid_client` 401 on token exchange | `apiSecret` missing from POST body | It's required on every platform — see §9 |
+| Login hangs forever with no error | No timeout / no Cancel wired | Set `networkTimeoutSeconds`, wire Skip/Cancel (§7) |
 | WebGL token exchange fails with a CORS error | Jiwe hasn't allow-listed your hosted domain | Ask Jiwe to whitelist your domain |
-| Reward call silently does nothing | Player not logged in | Reward calls need `auth.IsLoggedIn == true` first |
+| Reward or purchase call silently does nothing | Player not logged in | Both need `auth.IsLoggedIn == true` first |
 | Leaderboard entry shows XP `0` | Some entries carry the total under `currentXP` instead of `xp` | Prefer `currentXP` when nonzero |
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
 | Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §3 |
-| WebGL build "uploads fine" but shows a blank page / endless loading bar | Compression Format not Disabled, or (threaded builds only) missing COOP/COEP headers | See §7 |
+| WebGL build "uploads fine" but shows a blank page / endless loading bar | Compression Format not Disabled, or (threaded builds only) missing COOP/COEP headers | See §8 |
+| Player charged twice for one purchase | A retry generated a NEW `idempotencyKey` instead of reusing the one from the failed attempt | See §6 — persist and reuse the same key until the purchase settles |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact
 Jiwe directly: WhatsApp **+254773754444** or **rock@jiwe.io**.
 
 ---
 
-## 12. Jiwe IO platform basics
+## 13. Jiwe IO platform basics
 
 Steps outside the SDK itself — registering an account and creating your application.
 
@@ -536,7 +602,7 @@ Steps outside the SDK itself — registering an account and creating your applic
 <summary>Uploading your game to Jiwe IO</summary>
 
 Upload directly from the Jiwe IO upload page — no form or manual handoff needed. If
-you're on WebGL, see §7 before your first upload.
+you're on WebGL, see §8 before your first upload.
 
 </details>
 
@@ -544,14 +610,15 @@ you're on WebGL, see §7 before your first upload.
 
 ## Roadmap
 
-- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §8, §9, and §10 above
-  (credential model, redirect-URI model, API surface, security checklist, Game
-  Data patterns) should carry over almost unchanged — only §4 (Quickstart), §6
-  (platform redirect mechanics), and §7 (WebGL export settings, if the target
-  engine ships a WebGL exporter with similar tradeoffs) are engine-specific and
-  will need their own writeup per engine.
+- **Unreal and Godot SDKs.** When they land, §2, §3, §5, §6, §9, §10, and §11
+  above (credential model, redirect-URI model, API surface, purchase/idempotency
+  model, security checklist, Game Data patterns) should carry over almost
+  unchanged — only §4 (Quickstart), §7 (platform redirect mechanics), and §8
+  (WebGL export settings, if the target engine ships a WebGL exporter with
+  similar tradeoffs) are engine-specific and will need their own writeup per
+  engine.
 - **A non-technical way to edit Game Data.** Right now setting `minClientVersion`
-  or `announcement` (§10) means a dev hand-crafting a Postman request — fine for
+  or `announcement` (§11) means a dev hand-crafting a Postman request — fine for
   occasional use, but worth a real dashboard control if this becomes routine.
 - **Celo wallet / Kotani Pay withdrawal flow.** Partially built — connecting a
   Jiwe wallet to Celo and withdrawing out to M-Pesa via Kotani Pay exists but

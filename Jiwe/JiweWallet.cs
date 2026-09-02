@@ -120,10 +120,18 @@ namespace Jiwe
         /// <summary>
         /// Raw read access to your app's Game Data — an app-scoped JSON key/value blob (no player
         /// login needed), for anything the game should react to without shipping a new build: a
-        /// minimum-supported-version gate, an in-game announcement, a feature flag, etc. Deliberately
-        /// schema-less here — define your own [Serializable] class for whatever you store and parse
-        /// RawResponse yourself with JsonUtility.FromJson&lt;T&gt;. See the README's "Game Data
-        /// patterns" section for worked examples (version gate, announcement banner).
+        /// minimum-supported-version gate, an in-game announcement, a feature flag, etc. This is
+        /// Jiwe's own documented use case for this endpoint, not a workaround.
+        ///
+        /// Deliberately schema-less here — define your own [Serializable] class for whatever you
+        /// store and parse RawResponse yourself with JsonUtility.FromJson&lt;T&gt;. Per Jiwe's docs,
+        /// the response wraps your fields in an envelope — {"type", "gameData": {...your fields...},
+        /// "_version"} — so your class needs a `gameData` field of your own nested type, not a flat
+        /// shape matching RawResponse directly. See the README's "Game Data patterns" section for
+        /// worked examples (version gate, announcement banner).
+        ///
+        /// Treat everything stored here as PUBLIC: Jiwe's docs say explicitly that Game Data should
+        /// be OK to expose, and reading it only requires X-API-USERNAME, not the secret X-API-KEY.
         /// </summary>
         public void GetGameData(Action<JiweWalletResult> onComplete)
         {
@@ -133,7 +141,10 @@ namespace Jiwe
         /// <summary>
         /// Writes to your app's Game Data. Confirmed live: updates merge/patch rather than replace —
         /// sending a JSON object only touches the keys you include, so set a field to null explicitly
-        /// to clear it rather than expecting an empty payload to wipe existing data.
+        /// to clear it rather than expecting an empty payload to wipe existing data. jsonPayload should
+        /// mirror the read side's envelope, e.g. {"gameData": {"minClientVersion": 8}} rather than a
+        /// bare {"minClientVersion": 8} — inferred from that symmetry since Jiwe's docs don't show a
+        /// request body sample for this endpoint, so verify against a real request before shipping.
         /// </summary>
         public void SetGameData(string jsonPayload, Action<JiweWalletResult> onComplete)
         {

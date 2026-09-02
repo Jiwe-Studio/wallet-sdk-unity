@@ -375,10 +375,34 @@ app-scoped JSON blob — no player login needed, no schema enforced by the SDK.
 What you store and how you interpret it is entirely up to you; the two patterns
 below are starting points, not something the SDK bakes in.
 
+**Jiwe's own docs confirm this is exactly what Game Data is for**: *"These allow
+the game to store user game related data such as active version, supported
+versions, minimum Android requirements etc."* — the version-gate pattern below
+isn't a workaround, it's the documented use case.
+
+**Response shape has an envelope — your fields aren't at the top level.** The
+official sample response is:
+
+```json
+{ "type": "OK", "gameData": { "activeVersion": 12, "supportedVersions": [12, 13, 14, 15] }, "_version": 1 }
+```
+
+Your own fields live *inside* `gameData`, not alongside `type`/`_version`. Model
+that wrapper explicitly rather than parsing `RawResponse` straight into a flat
+class:
+
 ```csharp
+[Serializable] class MyGameDataResponse { public string type; public MyGameData gameData; public int _version; }
 [Serializable] class MyGameData { public int minClientVersion; public Announcement announcement; }
 [Serializable] class Announcement { public string id; public string message; public string expiresAt; }
 ```
+
+> **Treat everything you put in Game Data as public.** Jiwe's own docs say so
+> explicitly: *"Whatever is shared here the developer should be okay being
+> exposed to the 'public'."* Reading it only requires `X-API-USERNAME` (not the
+> secret `X-API-KEY`) per the documented Fetch Data headers — this is not a
+> private per-app store. Never put anything here you wouldn't want a player to
+> see by inspecting network traffic.
 
 Both patterns below read the same blob at launch, before login starts:
 
@@ -386,7 +410,7 @@ Both patterns below read the same blob at launch, before login starts:
 flowchart TD
     Start([Game launches]) --> Fetch["GetGameData()"]
     Fetch -- "fails / timeout" --> Proceed
-    Fetch -- success --> Parse["Parse RawResponse\ninto MyGameData"]
+    Fetch -- success --> Parse["Parse RawResponse\ninto MyGameDataResponse,\nread .gameData"]
     Parse --> VerCheck{"minClientVersion\n> MyBuildVersion?"}
     VerCheck -- yes --> Block["Show update banner\n(§9 has the alternative:\nkey-rotation, all builds at once)"]
     VerCheck -- no --> AnnCheck{"announcement.id new\nand not expired?"}
@@ -413,8 +437,8 @@ const int MyBuildVersion = 7;
 
 jiweWallet.GetGameData(result => {
     if (!result.Success) return; // fail OPEN — a network blip should never look like "must update"
-    var data = JsonUtility.FromJson<MyGameData>(result.RawResponse);
-    if (data.minClientVersion > MyBuildVersion) ShowUpdateBanner();
+    var data = JsonUtility.FromJson<MyGameDataResponse>(result.RawResponse).gameData;
+    if (data != null && data.minClientVersion > MyBuildVersion) ShowUpdateBanner();
 });
 ```
 
@@ -432,8 +456,8 @@ without a build, e.g. "double XP weekend live now."
 ```csharp
 jiweWallet.GetGameData(result => {
     if (!result.Success) return;
-    var data = JsonUtility.FromJson<MyGameData>(result.RawResponse);
-    var a = data.announcement;
+    var data = JsonUtility.FromJson<MyGameDataResponse>(result.RawResponse).gameData;
+    var a = data?.announcement;
     if (a == null || a.id == PlayerPrefs.GetString("lastSeenAnnouncement", "")) return;
     if (!string.IsNullOrEmpty(a.expiresAt) && DateTime.UtcNow > DateTime.Parse(a.expiresAt)) return;
 
@@ -462,9 +486,15 @@ There's currently no non-technical way to edit Game Data from Jiwe's dashboard �
 setting `minClientVersion` or `announcement` means calling `POST
 /rest/api/v1/metadata/update/game-data` directly (e.g. from Postman), with
 `X-API-USERNAME`/`X-API-KEY` headers, the same pair `JiweWallet` uses. Updates
-merge/patch rather than replace — sending `{"announcement": {...}}` doesn't
-clear `minClientVersion` or vice versa, but if you need to remove a field
+merge/patch rather than replace — sending `{"gameData": {"announcement": {...}}}`
+doesn't clear `minClientVersion` or vice versa, but if you need to remove a field
 entirely rather than change it, set it to `null` explicitly.
+
+**Wrap the body in the same `gameData` envelope as the read response** —
+`{"gameData": {"minClientVersion": 8}}`, not a bare `{"minClientVersion": 8}` —
+mirroring the Fetch Data shape. This is inferred from that symmetry and Jiwe's
+own docs not showing a request-body sample for Update Data, so verify against a
+real request before relying on it in production.
 
 ---
 

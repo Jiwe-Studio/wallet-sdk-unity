@@ -68,14 +68,25 @@ flowchart TB
         R3["GiveAirtimeReward"]
         R4["PurchaseWithWallet"]
     end
+    subgraph BearerOnly["A THIRD boundary — no apiUsername/apiKey at all"]
+        direction LR
+        B1["GetRewardsEarned"]
+    end
     Static(["apiUsername / apiKey only"]) --> NoLoginNeeded
     Token(["apiUsername / apiKey\n+ player IdToken"]) --> LoginRequired
+    Bearer(["player AccessToken only\n(Authorization: Bearer)"]) --> BearerOnly
 ```
 
 Unlike an older version of this SDK, there **is now** a real purchase (charge-the-
 player) endpoint — `PurchaseWithWallet`, debiting the player's own Jiwe balance.
 See §6 for the full flow; it has a real double-charge footgun if you get the retry
 handling wrong, so it's worth reading before you wire it up.
+
+`GetRewardsEarned` doesn't fit the two-pair model above at all — it's a third,
+separate authentication boundary ("Hermes OIDC bearer" in Jiwe's docs) that uses
+only the player's own `AccessToken`, no static credentials whatsoever. Jiwe's
+docs say mixing API-key headers into a request on this boundary is refused
+outright. See §6.
 
 ---
 
@@ -185,8 +196,9 @@ call-specific fields).
 | `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | XP has no monetary value |
 | `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | "Cowrie" — Jiwe's in-game currency |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Min. 5 units; credits real airtime |
-| `PurchaseWithWallet(amount, itemId, description, idempotencyKey, onComplete)` | Yes | Debits the player's own balance — see §6, `idempotencyKey` is not optional |
+| `PurchaseWithWallet(amount, entityId, entityName, description, idempotencyKey, onComplete, gamerWalletId?)` | Yes | Debits the player's own balance — see §6, `idempotencyKey` is not optional |
 | `GetPurchaseStatus(paymentOrderId, onComplete)` | Yes | Poll a purchase by the `PaymentOrderId` from a purchase result |
+| `GetRewardsEarned(onComplete)` | Yes | Player's own totals via `AccessToken`, not `IdToken` — a different auth boundary, see §6 |
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
 | `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
@@ -210,6 +222,15 @@ jiweWallet.GetLeaderboard("xp", maxEntries: 20, period: null, bestPointsRanking:
 in-game item — a real purchase endpoint, unlike an older version of this SDK
 which had none. Per Jiwe's docs: *"A purchase never partially applies. If
 anything fails, no money moves."*
+
+> **Field names corrected against Jiwe's hand-written "Take a payment" guide**:
+> the request takes `entityId`/`entityName`, not `itemId` — the API reference's
+> auto-generated example used `itemId`, but that page explicitly warns its
+> examples are "generated automatically... and not accurate." The guide's
+> example is hand-written and more trustworthy. It also includes an optional
+> `gamerWalletId` this SDK currently has no way to obtain (nothing in the login
+> flow surfaces a player's wallet ID) — left as an optional parameter, `null`
+> unless you've confirmed with Jiwe whether it's actually required.
 
 ### Many calls here are accepted, not settled
 
@@ -294,10 +315,10 @@ if (string.IsNullOrEmpty(idempotencyKey)) {
     PlayerPrefs.Save(); // persist BEFORE the network call — a crash mid-purchase must not lose this
 }
 
-jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula skin", idempotencyKey, result => {
+jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula Skin", "Nebula skin", idempotencyKey, result => {
     if (result.Success && result.Status == "POSTED") {
         PlayerPrefs.DeleteKey("pendingPurchaseKey"); // settled — safe to generate a fresh key next time
-        UnlockItem(result.ItemId);
+        UnlockItem(result.EntityId);
     } else if (result.Success) {
         // Accepted but not settled (PENDING / requires approval) — poll GetPurchaseStatus,
         // don't unlock yet, and don't touch the stored key until it resolves.
@@ -323,6 +344,41 @@ jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula skin", idempotencyK
   or force-quit between "purchase sent" and "response received" is exactly the
   case this exists to protect against.
 - Max 200 characters for the key value.
+
+### Reading what a player has earned
+
+`GetRewardsEarned` uses a genuinely different call shape from everything else
+in this section — it's Jiwe's documented **player-facing** pattern:
+`Authorization: Bearer <access_token>`, no `X-API-USERNAME`/`X-API-KEY` at all.
+Jiwe's docs say this "Hermes OIDC bearer" boundary and the API-key boundary are
+mutually exclusive on a request — presenting both is refused, not merged.
+
+```csharp
+jiweWallet.GetRewardsEarned(result => {
+    if (result.Success) Debug.Log($"Points: {result.Points}, XP: {result.XP}, Airtime: {result.AirtimeEarned}");
+});
+```
+
+It uses `JiweAuth.AccessToken`, not `IdToken` — sending an ID token as a bearer
+token is explicitly wrong per Jiwe's docs (it isn't audienced to an API). The
+access token is short-lived for the Wallet API (documented around 15 minutes)
+and this SDK doesn't refresh it, so a failure here after the player has been
+logged in a while most likely means "log in again," not "retry this call."
+
+### What's deliberately not implemented yet
+
+Jiwe's API reference lists several more endpoints — `rewards/cowrie`,
+`rewards/data`, wallet-funded airtime/data purchases
+(`airtime/adhoc-wallet-purchase`, `data/adhoc-wallet-purchase`),
+`rewards/summary`, subscriptions, campaigns, pots. The purchase field-name bug
+above (`itemId` vs `entityId`) was
+caught only because a hand-written guide happened to cover that specific
+endpoint; the others only have auto-generated reference examples, which that
+same page admits aren't reliable. Rather than repeat the mistake, those aren't
+in the SDK yet — confirm real request shapes with Jiwe (or a live Postman
+request) before adding them. Subscriptions/campaigns/pots also look like
+backend/admin surface rather than something a Unity client should call
+directly with an embedded API secret.
 
 ---
 

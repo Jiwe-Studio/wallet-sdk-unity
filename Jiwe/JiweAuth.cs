@@ -63,8 +63,17 @@ namespace Jiwe
         [Tooltip("Start login automatically on Awake. Turn off to call Login() yourself (e.g. from a menu button).")]
         public bool loginOnStart = true;
 
-        /// <summary>The id_token to send as the reward/purchase API's bearer token. Empty until login succeeds.</summary>
+        /// <summary>The id_token sent as the X-API-TOKEN header on reward/purchase calls (JiweWallet's API-key
+        /// boundary). Empty until login succeeds. This is NOT a bearer token — Jiwe's docs are explicit that
+        /// an ID token must never be sent as one, since it isn't audienced to an API. Don't reuse it for the
+        /// OIDC-bearer calls that want AccessToken below.</summary>
         public string IdToken { get; private set; } = "";
+        /// <summary>The access_token from login — required for the small set of "Hermes OIDC bearer" calls
+        /// documented as the player-facing way to call some endpoints directly (Authorization: Bearer, no API
+        /// key at all), e.g. GET /api/v1/oidc/rewards/earned. Empty until login succeeds. Unlike IdToken, this
+        /// is short-lived (documented as 15 minutes for the Wallet API audience) — this SDK does not currently
+        /// refresh it, so treat a 401 on an OIDC-bearer call as "log in again," not as a bug to retry blindly.</summary>
+        public string AccessToken { get; private set; } = "";
         public bool IsLoggedIn => !string.IsNullOrEmpty(IdToken);
         public JiweUserInfo UserInfo { get; private set; }
 
@@ -365,6 +374,7 @@ namespace Jiwe
             }
 
             IdToken = token.id_token;
+            AccessToken = token.access_token;
             await FetchUserInfo(token.access_token);
             OnLoginSuccess?.Invoke();
         }

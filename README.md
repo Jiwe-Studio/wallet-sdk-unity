@@ -211,8 +211,41 @@ in-game item — a real purchase endpoint, unlike an older version of this SDK
 which had none. Per Jiwe's docs: *"A purchase never partially applies. If
 anything fails, no money moves."*
 
-**The one thing that matters here: `idempotencyKey` is not optional, and reusing
-it correctly is the difference between a safe retry and a real double charge.**
+### Many calls here are accepted, not settled
+
+`PurchaseWithWallet` isn't always a same-request success/fail — Jiwe's own docs
+describe it as asynchronous, and the HTTP status tells you which case you're in:
+
+| Status | Meaning |
+|---|---|
+| `200` | Done. The response is the final result. |
+| `201` | Created and handed to a payment rail — not yet settled. |
+| `202` | Accepted for processing — not yet settled. |
+
+A `201`/`202` still carries a `ledger_transaction_id` — that's your handle on
+the eventual outcome, and `result.Success` being `true` in the SDK does **not**
+by itself mean the purchase settled. The underlying transaction then moves
+through its own states:
+
+| State | Meaning |
+|---|---|
+| `PENDING` | Recorded, not settled. |
+| `POSTED` | Settled. Immutable. |
+| `ARCHIVED` | Closed without posting. |
+| `FAILED` | Did not complete. |
+| `REVERSED` | Posted, then reversed by a compensating transaction. |
+
+**Don't unlock the item until `Status == "POSTED"`** — treat `RequiresApproval:
+true` or any non-`POSTED` status as "not yet paid," and poll
+`GetPurchaseStatus(result.PaymentOrderId, ...)` (with backoff — start around a
+second and grow the interval, don't tight-loop) until it settles one way or the
+other.
+
+### `idempotencyKey` is not optional — get the retry logic right
+
+Reusing the same key on a retry returns the **original** outcome instead of
+charging twice. But that only protects you if you reuse it correctly — get the
+distinction below wrong and it's a real double charge, not a theoretical one.
 
 ```mermaid
 sequenceDiagram
@@ -221,16 +254,37 @@ sequenceDiagram
 
     Game->>Game: Generate idempotencyKey ONCE, persist it locally
     Game->>Jiwe: POST /purchases/wallet (Idempotency-Key: <key>)
-    alt Clean response
+    alt Clean response — settled
         Jiwe-->>Game: { status: "POSTED", payment_order_id, ... }
-        Game->>Game: Clear the stored key — this purchase is settled
-    else Timeout / dropped connection / crash mid-call
-        Game->>Game: Outcome UNKNOWN — do NOT generate a new key
+        Game->>Game: Clear the stored key — done, safe to generate a fresh one next purchase
+    else Timeout / dropped connection / crash mid-call — outcome UNKNOWN
+        Game->>Game: Do NOT generate a new key
         Note over Game: On next attempt (retry button, next launch, etc.)
         Game->>Jiwe: Retry POST /purchases/wallet (SAME Idempotency-Key)
-        Jiwe-->>Game: The ORIGINAL purchase result — no second charge
+        Jiwe-->>Game: The ORIGINAL outcome replayed — no second charge
+    else Confirmed failure — this is NOT ambiguous
+        Jiwe-->>Game: A definitive failure response for this key
+        Game->>Game: This exact key is now bound to that failure forever
+        Note over Game: To genuinely retry, generate a BRAND NEW key —
+        Note over Game: replaying the same one just returns the same failure again
     end
 ```
+
+The mistake this exists to prevent isn't "forgetting" the key — it's treating
+**every** retry the same way. There are two genuinely different situations:
+
+- **Ambiguous outcome** (timeout, dropped connection, app crash before the
+  response arrived) — you don't know what happened, so reuse the *same* key.
+  That's the safe case this mechanism is for.
+- **Confirmed failure** (a definitive error response came back for that key) —
+  that key is now permanently bound to that failure. Replaying it returns the
+  *same failure* again, not a fresh attempt. A genuine retry after a confirmed
+  failure needs a **new** key, because it's a new operation.
+
+Reusing a key for a request with **different contents** (a different amount or
+item) is rejected outright with a `409` and executes nothing — the key is
+bound to what it was first used for, so this fails safely rather than doing
+something unexpected.
 
 ```csharp
 string idempotencyKey = PlayerPrefs.GetString("pendingPurchaseKey", "");
@@ -241,26 +295,33 @@ if (string.IsNullOrEmpty(idempotencyKey)) {
 }
 
 jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula skin", idempotencyKey, result => {
-    if (result.Success) {
+    if (result.Success && result.Status == "POSTED") {
         PlayerPrefs.DeleteKey("pendingPurchaseKey"); // settled — safe to generate a fresh key next time
         UnlockItem(result.ItemId);
+    } else if (result.Success) {
+        // Accepted but not settled (PENDING / requires approval) — poll GetPurchaseStatus,
+        // don't unlock yet, and don't touch the stored key until it resolves.
+        PollPurchaseStatus(result.PaymentOrderId);
+    } else if (string.IsNullOrEmpty(result.RawResponse)) {
+        // No response body at all — a connection-level failure (timeout, dropped connection),
+        // not a reply from Jiwe. The server may never have seen this request, or may have
+        // processed it without the response reaching us — genuinely ambiguous. Keep the SAME
+        // key; the next attempt safely replays whatever actually happened.
+        ShowRetryPrompt();
     } else {
-        // Don't clear the key here — the purchase's true state may still be unknown to the client.
-        // Retry later by calling PurchaseWithWallet again with this SAME idempotencyKey.
+        // Jiwe DID respond, with a definitive error for this key — not ambiguous. Replaying
+        // this key again just returns the same failure. A real retry needs a fresh key.
+        PlayerPrefs.DeleteKey("pendingPurchaseKey");
         ShowPurchaseFailed(result.Error);
     }
 });
 ```
 
 - **Generate the key once, before the first attempt** — not inside a retry
-  helper, not fresh on every call. If you regenerate it per attempt, a timeout
-  followed by a retry becomes two separate purchases.
+  helper, not fresh on every call.
 - **Persist it to disk before the network call**, not just in memory — a crash
   or force-quit between "purchase sent" and "response received" is exactly the
   case this exists to protect against.
-- **`RequiresApproval: true` or `Status: "PENDING"`** means the purchase isn't
-  finalized yet — don't unlock the item on `Success` alone; poll
-  `GetPurchaseStatus(result.PaymentOrderId, ...)` until `Status == "POSTED"`.
 - Max 200 characters for the key value.
 
 ---

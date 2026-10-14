@@ -59,12 +59,27 @@ namespace Jiwe
         [Header("Android/iOS only — must be registered with Jiwe as a redirect_uri")]
         public string mobileRedirectScheme = "jiwewallet";
 
+        [Header("Optional — only for GetRewardsEarned and other OIDC-bearer calls")]
+        [Tooltip("Extra space-separated scopes appended to the login request, e.g. \"rewards:read\". Leave empty to keep today's behaviour exactly. Every scope you list must ALSO be enabled on your app's registration form, or login can fail with access_denied.")]
+        public string extraScopes = "";
+        [Tooltip("Your Wallet API resource identifier (issued by Jiwe during onboarding). When set, it's sent as &resource= so the access token is audienced to the Wallet API — per Jiwe's docs, a token minted without it is for the default resource and Wallet calls return 401. Leave empty if you only use API-key calls.")]
+        public string walletResource = "";
+
         [Header("Behaviour")]
         [Tooltip("Start login automatically on Awake. Turn off to call Login() yourself (e.g. from a menu button).")]
         public bool loginOnStart = true;
 
-        /// <summary>The id_token to send as the reward/purchase API's bearer token. Empty until login succeeds.</summary>
+        /// <summary>The id_token sent as the X-API-TOKEN header on reward/purchase calls (JiweWallet's API-key
+        /// boundary). Empty until login succeeds. This is NOT a bearer token — Jiwe's docs are explicit that
+        /// an ID token must never be sent as one, since it isn't audienced to an API. Don't reuse it for the
+        /// OIDC-bearer calls that want AccessToken below.</summary>
         public string IdToken { get; private set; } = "";
+        /// <summary>The access_token from login — required for the small set of "Hermes OIDC bearer" calls
+        /// documented as the player-facing way to call some endpoints directly (Authorization: Bearer, no API
+        /// key at all), e.g. GET /api/v1/oidc/rewards/earned. Empty until login succeeds. Unlike IdToken, this
+        /// is short-lived (documented as 15 minutes for the Wallet API audience) — this SDK does not currently
+        /// refresh it, so treat a 401 on an OIDC-bearer call as "log in again," not as a bug to retry blindly.</summary>
+        public string AccessToken { get; private set; } = "";
         public bool IsLoggedIn => !string.IsNullOrEmpty(IdToken);
         public JiweUserInfo UserInfo { get; private set; }
 
@@ -132,9 +147,12 @@ namespace Jiwe
 
         private string BuildAuthUrl(string redirectUri, string codeChallenge)
         {
-            return $"{AuthEndpoint}?response_type=code&scope={Uri.EscapeDataString(Scope)}" +
+            string scope = string.IsNullOrWhiteSpace(extraScopes) ? Scope : $"{Scope} {extraScopes.Trim()}";
+            string url = $"{AuthEndpoint}?response_type=code&scope={Uri.EscapeDataString(scope)}" +
                    $"&redirect_uri={Uri.EscapeDataString(redirectUri)}&client_id={Uri.EscapeDataString(clientId)}" +
                    $"&state={_state}&code_challenge={codeChallenge}&code_challenge_method=S256";
+            if (!string.IsNullOrWhiteSpace(walletResource)) url += $"&resource={Uri.EscapeDataString(walletResource.Trim())}";
+            return url;
         }
 
         // ---------------------------------------------------------------
@@ -365,6 +383,7 @@ namespace Jiwe
             }
 
             IdToken = token.id_token;
+            AccessToken = token.access_token;
             await FetchUserInfo(token.access_token);
             OnLoginSuccess?.Invoke();
         }

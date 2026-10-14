@@ -11,20 +11,18 @@ namespace Jiwe
     /// Jiwe Wallet API (confirmed current as of "Jiwe Wallet Documentation
     /// [WIP]": abacus.jiwe.io/rest/api/v1/*).
     ///
-    /// Two kinds of calls here:
+    /// Three kinds of calls here:
     ///   - Reward calls (XP / points / airtime) credit a specific PLAYER's
     ///     account, so they need that player logged in via JiweAuth — the
     ///     X-API-TOKEN header is their id_token.
+    ///   - Purchases (PurchaseWithWallet) debit the logged-in player's own
+    ///     Jiwe balance for an in-game item — also needs X-API-TOKEN, plus a
+    ///     caller-supplied Idempotency-Key (see PurchaseWithWallet's doc
+    ///     comment — this one has a real double-charge footgun if misused).
     ///   - Everything else (leaderboard, wallet balance, transaction status,
     ///     Game Data) is scoped to YOUR app, not a specific player, and only
     ///     needs the static X-API-USERNAME/X-API-KEY pair below — no login
     ///     required, so these work even before a player has logged in.
-    ///
-    /// Note: there is no "Purchase" (charge-the-player) endpoint in the
-    /// current API docs — the previous SDK's Purchase() call had no
-    /// current equivalent and has been removed rather than left pointing at
-    /// a stale/wrong host. If Jiwe adds a player-purchase endpoint later,
-    /// add it here following the same pattern as the reward methods below.
     /// </summary>
     public class JiweWallet : MonoBehaviour
     {
@@ -66,6 +64,76 @@ namespace Jiwe
         {
             var payload = new AirtimeRewardPayload { airtimeReward = airtimeReward, description = description, recipientNumber = recipientNumber, gameSessionId = GameSessionId, transactionId = transactionId ?? Guid.NewGuid().ToString("N").Substring(0, 8), metadata = new EmptyMetadata() };
             StartCoroutine(PostReward($"{BaseUrl}/rewards/airtime", JsonUtility.ToJson(payload), onComplete));
+        }
+
+        // -----------------------------------------------------------------
+        // Purchases (debit the logged-in player's own wallet; require JiweAuth.IdToken)
+        // -----------------------------------------------------------------
+
+        /// <summary>
+        /// Charges the logged-in player's own Jiwe wallet balance for an in-game item. A purchase
+        /// never partially applies — it either fully succeeds or nothing moves.
+        ///
+        /// Request fields match the WalletPurchase schema in Jiwe's supported API reference
+        /// (v1.0.15): amount, itemId, description, metadata. <c>itemId</c> is YOUR catalogue
+        /// reference for what's being bought — Jiwe carries it onto the purchase record but never
+        /// prices or validates it, so the amount you send is the amount charged (see README §6 on
+        /// why that matters for a client-side purchase). Jiwe's hand-written "Take a payment" guide
+        /// shows entityId/entityName/gamerWalletId on this endpoint instead; those are the fields of
+        /// the separate purchases/adhoc endpoint, and don't appear anywhere in this endpoint's schema.
+        ///
+        /// <c>idempotencyKey</c> is NOT optional and NOT auto-generated, unlike the reward calls'
+        /// transactionId. Generate it ONCE, right before this call, store it locally, and reuse the
+        /// EXACT same value if you retry after a timeout or an otherwise-ambiguous failure — sending
+        /// the same key again returns the ORIGINAL purchase instead of charging the player a second
+        /// time. Generating a fresh key on every retry defeats the entire point of this header and
+        /// risks a real double charge. Max 200 characters. See the README's "In-app purchases"
+        /// section for the full retry-safe flow.
+        /// </summary>
+        public void PurchaseWithWallet(int amount, string itemId, string description, string idempotencyKey, Action<JiwePurchaseResult> onComplete)
+        {
+            var payload = new PurchasePayload { amount = amount, itemId = itemId, description = description, metadata = new EmptyMetadata() };
+            StartCoroutine(PostPurchase(JsonUtility.ToJson(payload), idempotencyKey, onComplete));
+        }
+
+        /// <summary>
+        /// Checks a purchase's current status by the <c>PaymentOrderId</c> from PurchaseWithWallet's
+        /// result — use this after a timeout/ambiguous PurchaseWithWallet call if you don't have the
+        /// idempotency key on hand to safely retry, or to poll a purchase where RequiresApproval was
+        /// true. Same API-key headers plus X-API-TOKEN as PurchaseWithWallet, per the reference.
+        /// </summary>
+        public void GetPurchaseStatus(string paymentOrderId, Action<JiwePurchaseResult> onComplete)
+        {
+            StartCoroutine(GetPurchase(paymentOrderId, onComplete));
+        }
+
+        // -----------------------------------------------------------------
+        // Player-facing OIDC bearer call (a different auth boundary — no API key at all)
+        // -----------------------------------------------------------------
+
+        /// <summary>
+        /// Reads the logged-in player's own earned totals (points/XP/airtime), using Jiwe's
+        /// documented player-facing pattern: <c>GET /api/v1/oidc/rewards/earned</c> with
+        /// <c>Authorization: Bearer &lt;access_token&gt;</c> — no <c>X-API-USERNAME</c>/<c>X-API-KEY</c>
+        /// at all. This is a genuinely different authentication boundary from every other call in this
+        /// file: Jiwe's docs say API-key headers and this "Hermes OIDC bearer" boundary are mutually
+        /// exclusive on a request, and presenting both is refused rather than one just being ignored.
+        ///
+        /// Requires the <c>rewards:read</c> scope (a token without it gets 403 — request the scope at
+        /// login via <see cref="JiweAuth.extraScopes"/>, don't retry) AND an access token audienced to
+        /// the Wallet API (set <see cref="JiweAuth.walletResource"/>; per Jiwe's docs a token minted
+        /// without it is for the default resource and Wallet calls 401). The supported reference lists
+        /// only points and XP in this response, so AirtimeEarned will read 0 here.
+        ///
+        /// Uses <see cref="JiweAuth.AccessToken"/>, not <see cref="JiweAuth.IdToken"/> — an ID token
+        /// must never be sent as a bearer token (it isn't audienced to an API; Jiwe's docs are explicit
+        /// about this). AccessToken is short-lived for the Wallet API audience (documented as roughly
+        /// 15 minutes) and this SDK does not refresh it — treat a 401 here as "the player needs to log
+        /// in again," not as a transient failure worth retrying as-is.
+        /// </summary>
+        public void GetRewardsEarned(Action<JiweRewardsEarnedResult> onComplete)
+        {
+            StartCoroutine(GetRewardsEarnedCoroutine(onComplete));
         }
 
         // -----------------------------------------------------------------
@@ -120,10 +188,18 @@ namespace Jiwe
         /// <summary>
         /// Raw read access to your app's Game Data — an app-scoped JSON key/value blob (no player
         /// login needed), for anything the game should react to without shipping a new build: a
-        /// minimum-supported-version gate, an in-game announcement, a feature flag, etc. Deliberately
-        /// schema-less here — define your own [Serializable] class for whatever you store and parse
-        /// RawResponse yourself with JsonUtility.FromJson&lt;T&gt;. See the README's "Game Data
-        /// patterns" section for worked examples (version gate, announcement banner).
+        /// minimum-supported-version gate, an in-game announcement, a feature flag, etc. This is
+        /// Jiwe's own documented use case for this endpoint, not a workaround.
+        ///
+        /// Deliberately schema-less here — define your own [Serializable] class for whatever you
+        /// store and parse RawResponse yourself with JsonUtility.FromJson&lt;T&gt;. Per Jiwe's docs,
+        /// the response wraps your fields in an envelope — {"type", "gameData": {...your fields...},
+        /// "_version"} — so your class needs a `gameData` field of your own nested type, not a flat
+        /// shape matching RawResponse directly. See the README's "Game Data patterns" section for
+        /// worked examples (version gate, announcement banner).
+        ///
+        /// Treat everything stored here as PUBLIC: Jiwe's docs say explicitly that Game Data should
+        /// be OK to expose, and reading it only requires X-API-USERNAME, not the secret X-API-KEY.
         /// </summary>
         public void GetGameData(Action<JiweWalletResult> onComplete)
         {
@@ -133,7 +209,10 @@ namespace Jiwe
         /// <summary>
         /// Writes to your app's Game Data. Confirmed live: updates merge/patch rather than replace —
         /// sending a JSON object only touches the keys you include, so set a field to null explicitly
-        /// to clear it rather than expecting an empty payload to wipe existing data.
+        /// to clear it rather than expecting an empty payload to wipe existing data. jsonPayload should
+        /// mirror the read side's envelope, e.g. {"gameData": {"minClientVersion": 8}} rather than a
+        /// bare {"minClientVersion": 8} — inferred from that symmetry since Jiwe's docs don't show a
+        /// request body sample for this endpoint, so verify against a real request before shipping.
         /// </summary>
         public void SetGameData(string jsonPayload, Action<JiweWalletResult> onComplete)
         {
@@ -217,6 +296,99 @@ namespace Jiwe
             onComplete?.Invoke(new JiweLeaderboardResult { Success = true, Entries = response.leaderboard ?? Array.Empty<JiweLeaderboardEntry>() });
         }
 
+        private IEnumerator PostPurchase(string jsonPayload, string idempotencyKey, Action<JiwePurchaseResult> onComplete)
+        {
+            if (auth == null || !auth.IsLoggedIn)
+            {
+                onComplete?.Invoke(new JiwePurchaseResult { Success = false, Error = "Not logged in to Jiwe — call JiweAuth.Login() first." });
+                yield break;
+            }
+
+            using var req = new UnityWebRequest($"{BaseUrl}/purchases/wallet", "POST");
+            req.timeout = NetworkTimeoutSeconds;
+            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(jsonPayload));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.SetRequestHeader("Idempotency-Key", idempotencyKey);
+            ApplyStaticHeaders(req);
+            req.SetRequestHeader("X-API-TOKEN", auth.IdToken);
+
+            yield return req.SendWebRequest();
+
+            onComplete?.Invoke(ParsePurchaseResponse(req));
+        }
+
+        private IEnumerator GetPurchase(string paymentOrderId, Action<JiwePurchaseResult> onComplete)
+        {
+            using var req = UnityWebRequest.Get($"{BaseUrl}/purchases/wallet/{paymentOrderId}");
+            req.timeout = NetworkTimeoutSeconds;
+            ApplyStaticHeaders(req);
+            if (auth != null && auth.IsLoggedIn) req.SetRequestHeader("X-API-TOKEN", auth.IdToken);
+            yield return req.SendWebRequest();
+
+            onComplete?.Invoke(ParsePurchaseResponse(req));
+        }
+
+        private JiwePurchaseResult ParsePurchaseResponse(UnityWebRequest req)
+        {
+            bool success = req.result == UnityWebRequest.Result.Success;
+            string text = req.downloadHandler.text;
+            string message = null;
+            PurchaseResponse parsed = null;
+            if (!string.IsNullOrEmpty(text))
+            {
+                parsed = JsonUtility.FromJson<PurchaseResponse>(text);
+                message = parsed?.message;
+                if (parsed != null && parsed.type == "ERROR") success = false;
+            }
+
+            return new JiwePurchaseResult
+            {
+                Success = success,
+                Error = success ? null : (message ?? req.error),
+                RawResponse = text,
+                PaymentOrderId = parsed?.payment_order_id,
+                LedgerTransactionId = parsed?.ledger_transaction_id,
+                Status = parsed?.status,
+                RequiresApproval = parsed?.requires_approval ?? false,
+                Amount = parsed?.amount ?? 0,
+                Currency = parsed?.currency,
+                ItemId = parsed?.itemId,
+                Description = parsed?.description,
+                CatalogPriceValidated = parsed?.catalogPriceValidated ?? false
+            };
+        }
+
+        private IEnumerator GetRewardsEarnedCoroutine(Action<JiweRewardsEarnedResult> onComplete)
+        {
+            if (auth == null || !auth.IsLoggedIn || string.IsNullOrEmpty(auth.AccessToken))
+            {
+                onComplete?.Invoke(new JiweRewardsEarnedResult { Success = false, Error = "Not logged in to Jiwe — call JiweAuth.Login() first." });
+                yield break;
+            }
+
+            using var req = UnityWebRequest.Get($"{BaseUrl}/oidc/rewards/earned");
+            req.timeout = NetworkTimeoutSeconds;
+            req.SetRequestHeader("Authorization", $"Bearer {auth.AccessToken}");
+            yield return req.SendWebRequest();
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                onComplete?.Invoke(new JiweRewardsEarnedResult { Success = false, Error = req.error, RawResponse = req.downloadHandler.text });
+                yield break;
+            }
+
+            var parsed = JsonUtility.FromJson<RewardsEarnedResponse>(req.downloadHandler.text);
+            onComplete?.Invoke(new JiweRewardsEarnedResult
+            {
+                Success = true,
+                Points = parsed.points,
+                XP = parsed.XP,
+                AirtimeEarned = parsed.airtimeEarned,
+                RawResponse = req.downloadHandler.text
+            });
+        }
+
         private IEnumerator GetGameDataCoroutine(Action<JiweWalletResult> onComplete)
         {
             using var req = UnityWebRequest.Get($"{BaseUrl}/metadata/game-data");
@@ -277,10 +449,13 @@ namespace Jiwe
         [Serializable] private class PointsRewardPayload { public int pointsEarned; public string description; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class AirtimeRewardPayload { public int airtimeReward; public string description; public string recipientNumber; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class TransactionStatusPayload { public string transactionId; }
+        [Serializable] private class PurchasePayload { public int amount; public string itemId; public string description; public EmptyMetadata metadata; }
+        [Serializable] private class PurchaseResponse { public string type; public string message; public string payment_order_id; public string ledger_transaction_id; public string status; public bool requires_approval; public int amount; public string currency; public string itemId; public string description; public bool catalogPriceValidated; }
         [Serializable] private class LeaderboardRequestPayload { public string rewardType; public int maxEntries; public string leaderboardPeriod; public string bestPointsRanking; }
         [Serializable] private class GenericResponse { public string type; public string message; public string ledger_transaction_id; }
         [Serializable] private class WalletBalanceResponse { public string type; public int debits; public int credits; public int available; }
         [Serializable] private class LeaderboardResponse { public string type; public JiweLeaderboardEntry[] leaderboard; }
+        [Serializable] private class RewardsEarnedResponse { public float points; public float XP; public float airtimeEarned; }
     }
 
     public struct JiweWalletResult
@@ -297,6 +472,32 @@ namespace Jiwe
         public int Debits;
         public int Credits;
         public int Available;
+    }
+
+    public struct JiweRewardsEarnedResult
+    {
+        public bool Success;
+        public string Error;
+        public string RawResponse;
+        public float Points;
+        public float XP;
+        public float AirtimeEarned;
+    }
+
+    public struct JiwePurchaseResult
+    {
+        public bool Success;
+        public string Error;
+        public string RawResponse;
+        public string PaymentOrderId;
+        public string LedgerTransactionId;
+        public string Status; // "PENDING" / "POSTED" / "ARCHIVED" / "FAILED" / "REVERSED" — see README §6
+        public bool RequiresApproval;
+        public int Amount;
+        public string Currency;
+        public string ItemId;
+        public string Description;
+        public bool CatalogPriceValidated;
     }
 
     public struct JiweLeaderboardResult

@@ -74,16 +74,13 @@ namespace Jiwe
         /// Charges the logged-in player's own Jiwe wallet balance for an in-game item. A purchase
         /// never partially applies — it either fully succeeds or nothing moves.
         ///
-        /// Field names here (entityId/entityName, not itemId) match Jiwe's hand-written "Take a
-        /// payment" guide, which contradicts the auto-generated schema example on the API reference
-        /// page (itemId) — the guide is the more trustworthy source, since the reference explicitly
-        /// warns its examples are "generated automatically... and not accurate." If a call fails
-        /// validation, re-check this against a real request before assuming something else is wrong.
-        ///
-        /// <c>gamerWalletId</c> is optional here because this SDK has no way to obtain a player's
-        /// wallet ID from anywhere else — it's included in Jiwe's own example request, so it may be
-        /// required in practice. Leave it null until you've confirmed with Jiwe whether omitting it
-        /// is valid or whether it's needed to disambiguate a player with more than one wallet.
+        /// Request fields match the WalletPurchase schema in Jiwe's supported API reference
+        /// (v1.0.15): amount, itemId, description, metadata. <c>itemId</c> is YOUR catalogue
+        /// reference for what's being bought — Jiwe carries it onto the purchase record but never
+        /// prices or validates it, so the amount you send is the amount charged (see README §6 on
+        /// why that matters for a client-side purchase). Jiwe's hand-written "Take a payment" guide
+        /// shows entityId/entityName/gamerWalletId on this endpoint instead; those are the fields of
+        /// the separate purchases/adhoc endpoint, and don't appear anywhere in this endpoint's schema.
         ///
         /// <c>idempotencyKey</c> is NOT optional and NOT auto-generated, unlike the reward calls'
         /// transactionId. Generate it ONCE, right before this call, store it locally, and reuse the
@@ -93,9 +90,9 @@ namespace Jiwe
         /// risks a real double charge. Max 200 characters. See the README's "In-app purchases"
         /// section for the full retry-safe flow.
         /// </summary>
-        public void PurchaseWithWallet(int amount, string entityId, string entityName, string description, string idempotencyKey, Action<JiwePurchaseResult> onComplete, string gamerWalletId = null)
+        public void PurchaseWithWallet(int amount, string itemId, string description, string idempotencyKey, Action<JiwePurchaseResult> onComplete)
         {
-            var payload = new PurchasePayload { amount = amount, entityId = entityId, entityName = entityName, description = description, gamerWalletId = gamerWalletId, metadata = new EmptyMetadata() };
+            var payload = new PurchasePayload { amount = amount, itemId = itemId, description = description, metadata = new EmptyMetadata() };
             StartCoroutine(PostPurchase(JsonUtility.ToJson(payload), idempotencyKey, onComplete));
         }
 
@@ -103,8 +100,7 @@ namespace Jiwe
         /// Checks a purchase's current status by the <c>PaymentOrderId</c> from PurchaseWithWallet's
         /// result — use this after a timeout/ambiguous PurchaseWithWallet call if you don't have the
         /// idempotency key on hand to safely retry, or to poll a purchase where RequiresApproval was
-        /// true. Headers here are inferred to match PurchaseWithWallet's (Jiwe's docs don't list them
-        /// separately for this call) — verify against a real request before relying on it.
+        /// true. Same API-key headers plus X-API-TOKEN as PurchaseWithWallet, per the reference.
         /// </summary>
         public void GetPurchaseStatus(string paymentOrderId, Action<JiwePurchaseResult> onComplete)
         {
@@ -122,6 +118,12 @@ namespace Jiwe
         /// at all. This is a genuinely different authentication boundary from every other call in this
         /// file: Jiwe's docs say API-key headers and this "Hermes OIDC bearer" boundary are mutually
         /// exclusive on a request, and presenting both is refused rather than one just being ignored.
+        ///
+        /// Requires the <c>rewards:read</c> scope (a token without it gets 403 — request the scope at
+        /// login via <see cref="JiweAuth.extraScopes"/>, don't retry) AND an access token audienced to
+        /// the Wallet API (set <see cref="JiweAuth.walletResource"/>; per Jiwe's docs a token minted
+        /// without it is for the default resource and Wallet calls 401). The supported reference lists
+        /// only points and XP in this response, so AirtimeEarned will read 0 here.
         ///
         /// Uses <see cref="JiweAuth.AccessToken"/>, not <see cref="JiweAuth.IdToken"/> — an ID token
         /// must never be sent as a bearer token (it isn't audienced to an API; Jiwe's docs are explicit
@@ -351,7 +353,7 @@ namespace Jiwe
                 RequiresApproval = parsed?.requires_approval ?? false,
                 Amount = parsed?.amount ?? 0,
                 Currency = parsed?.currency,
-                EntityId = parsed?.entityId,
+                ItemId = parsed?.itemId,
                 Description = parsed?.description,
                 CatalogPriceValidated = parsed?.catalogPriceValidated ?? false
             };
@@ -447,8 +449,8 @@ namespace Jiwe
         [Serializable] private class PointsRewardPayload { public int pointsEarned; public string description; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class AirtimeRewardPayload { public int airtimeReward; public string description; public string recipientNumber; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class TransactionStatusPayload { public string transactionId; }
-        [Serializable] private class PurchasePayload { public int amount; public string entityId; public string entityName; public string description; public string gamerWalletId; public EmptyMetadata metadata; }
-        [Serializable] private class PurchaseResponse { public string type; public string message; public string payment_order_id; public string ledger_transaction_id; public string status; public bool requires_approval; public int amount; public string currency; public string entityId; public string description; public bool catalogPriceValidated; }
+        [Serializable] private class PurchasePayload { public int amount; public string itemId; public string description; public EmptyMetadata metadata; }
+        [Serializable] private class PurchaseResponse { public string type; public string message; public string payment_order_id; public string ledger_transaction_id; public string status; public bool requires_approval; public int amount; public string currency; public string itemId; public string description; public bool catalogPriceValidated; }
         [Serializable] private class LeaderboardRequestPayload { public string rewardType; public int maxEntries; public string leaderboardPeriod; public string bestPointsRanking; }
         [Serializable] private class GenericResponse { public string type; public string message; public string ledger_transaction_id; }
         [Serializable] private class WalletBalanceResponse { public string type; public int debits; public int credits; public int available; }
@@ -493,7 +495,7 @@ namespace Jiwe
         public bool RequiresApproval;
         public int Amount;
         public string Currency;
-        public string EntityId; // field name inferred from the request side (entityId) — the GET response shape isn't shown in Jiwe's hand-written docs, only an unreliable auto-generated example, so verify before depending on this
+        public string ItemId;
         public string Description;
         public bool CatalogPriceValidated;
     }

@@ -196,9 +196,9 @@ call-specific fields).
 | `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | XP has no monetary value |
 | `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | "Cowrie" — Jiwe's in-game currency |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Min. 5 units; credits real airtime |
-| `PurchaseWithWallet(amount, entityId, entityName, description, idempotencyKey, onComplete, gamerWalletId?)` | Yes | Debits the player's own balance — see §6, `idempotencyKey` is not optional |
+| `PurchaseWithWallet(amount, itemId, description, idempotencyKey, onComplete)` | Yes | Debits the player's own balance — see §6, `idempotencyKey` is not optional |
 | `GetPurchaseStatus(paymentOrderId, onComplete)` | Yes | Poll a purchase by the `PaymentOrderId` from a purchase result |
-| `GetRewardsEarned(onComplete)` | Yes | Player's own totals via `AccessToken`, not `IdToken` — a different auth boundary, see §6 |
+| `GetRewardsEarned(onComplete)` | Yes | Player's own points/XP via `AccessToken`, not `IdToken` — a different auth boundary that also needs the `rewards:read` scope and `walletResource`, see §6 |
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |
 | `GetTransactionStatus(transactionId, onComplete)` | No | Poll any `ledger_transaction_id` from a reward result |
@@ -223,14 +223,22 @@ in-game item — a real purchase endpoint, unlike an older version of this SDK
 which had none. Per Jiwe's docs: *"A purchase never partially applies. If
 anything fails, no money moves."*
 
-> **Field names corrected against Jiwe's hand-written "Take a payment" guide**:
-> the request takes `entityId`/`entityName`, not `itemId` — the API reference's
-> auto-generated example used `itemId`, but that page explicitly warns its
-> examples are "generated automatically... and not accurate." The guide's
-> example is hand-written and more trustworthy. It also includes an optional
-> `gamerWalletId` this SDK currently has no way to obtain (nothing in the login
-> flow surfaces a player's wallet ID) — left as an optional parameter, `null`
-> unless you've confirmed with Jiwe whether it's actually required.
+> **Request fields: `amount`, `itemId`, `description`, `metadata`.** That's the
+> `WalletPurchase` schema in Jiwe's *supported* API reference (v1.0.15).
+> Jiwe's hand-written "Take a payment" guide shows `entityId`/`entityName`/
+> `gamerWalletId` on this endpoint instead — those are the fields of the separate
+> `purchases/adhoc` endpoint and aren't in this endpoint's schema, so don't use
+> them here. The newer v1.0.16
+> reference also shows an optional `potId`; it isn't in the supported version, so
+> it isn't exposed here.
+
+> **The price is whatever the client sends.** Jiwe carries `itemId` onto the
+> record but "never prices or validates" it (`catalogPriceValidated` is a field
+> on the response, not something you can rely on being enforced). A modified
+> client can change `amount` before it's sent, so a purchase issued directly from
+> a shipped build is only as trustworthy as that build — fine for low-stakes
+> cosmetics, not for anything where underpaying is a real loss. For those, price
+> on your own server and call this endpoint from there.
 
 ### Many calls here are accepted, not settled
 
@@ -315,10 +323,10 @@ if (string.IsNullOrEmpty(idempotencyKey)) {
     PlayerPrefs.Save(); // persist BEFORE the network call — a crash mid-purchase must not lose this
 }
 
-jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula Skin", "Nebula skin", idempotencyKey, result => {
+jiweWallet.PurchaseWithWallet(150, "skin_nebula_01", "Nebula skin", idempotencyKey, result => {
     if (result.Success && result.Status == "POSTED") {
         PlayerPrefs.DeleteKey("pendingPurchaseKey"); // settled — safe to generate a fresh key next time
-        UnlockItem(result.EntityId);
+        UnlockItem(result.ItemId);
     } else if (result.Success) {
         // Accepted but not settled (PENDING / requires approval) — poll GetPurchaseStatus,
         // don't unlock yet, and don't touch the stored key until it resolves.
@@ -353,31 +361,47 @@ in this section — it's Jiwe's documented **player-facing** pattern:
 Jiwe's docs say this "Hermes OIDC bearer" boundary and the API-key boundary are
 mutually exclusive on a request — presenting both is refused, not merged.
 
+**Two login settings it needs, both opt-in** (defaults leave login exactly as it was):
+
+| `JiweAuth` field | Set to | Why |
+|---|---|---|
+| `extraScopes` | `rewards:read` | Jiwe's scope table: `GET /oidc/rewards/earned` requires `rewards:read`. The default scopes don't include it, and a token without it gets `403` (not `401` — refreshing won't help, request the scope at login). Also enable it on your app's registration form. |
+| `walletResource` | your Wallet API resource identifier | Sent as `&resource=`. Without it the access token is for the *default* resource, "which is not the Wallet API," and Wallet calls return `401`. Jiwe issues the identifier during onboarding — ask them for yours. |
+
 ```csharp
+jiweAuth.extraScopes = "rewards:read";
+jiweAuth.walletResource = "<your Wallet API resource identifier>";
+// ...after login:
 jiweWallet.GetRewardsEarned(result => {
-    if (result.Success) Debug.Log($"Points: {result.Points}, XP: {result.XP}, Airtime: {result.AirtimeEarned}");
+    if (result.Success) Debug.Log($"Points: {result.Points}, XP: {result.XP}");
 });
 ```
 
-It uses `JiweAuth.AccessToken`, not `IdToken` — sending an ID token as a bearer
-token is explicitly wrong per Jiwe's docs (it isn't audienced to an API). The
-access token is short-lived for the Wallet API (documented around 15 minutes)
-and this SDK doesn't refresh it, so a failure here after the player has been
-logged in a while most likely means "log in again," not "retry this call."
+The supported reference lists only `points` and `XP` for this call, so
+`AirtimeEarned` will read 0. It uses `JiweAuth.AccessToken`, not `IdToken` —
+sending an ID token as a bearer token is explicitly wrong per Jiwe's docs. The
+access token is short-lived for the Wallet API (documented as 15 minutes) and
+public clients can't get a refresh token, so after it expires the answer is to
+send the player back through login, not to retry. **Not yet verified against a
+live account** — the scope and `resource` requirements come from Jiwe's docs.
+
+The same bearer boundary also has `GET /oidc/metadata/game-data`
+(`game-data:read`) and `GET /oidc/metadata/user-data` (`user-data:read`) — reads
+that need no API key, which would let the §11 version-gate/announcement patterns
+run without embedding `apiKey` for those calls. Not wired up yet.
 
 ### What's deliberately not implemented yet
 
 Jiwe's API reference lists several more endpoints — `rewards/cowrie`,
 `rewards/data`, wallet-funded airtime/data purchases
 (`airtime/adhoc-wallet-purchase`, `data/adhoc-wallet-purchase`),
-`rewards/summary`, subscriptions, campaigns, pots. The purchase field-name bug
-above (`itemId` vs `entityId`) was
-caught only because a hand-written guide happened to cover that specific
-endpoint; the others only have auto-generated reference examples, which that
-same page admits aren't reliable. Rather than repeat the mistake, those aren't
-in the SDK yet — confirm real request shapes with Jiwe (or a live Postman
-request) before adding them. Subscriptions/campaigns/pots also look like
-backend/admin surface rather than something a Unity client should call
+`rewards/summary`, notifications (`/notifications/*` and a player inbox under
+`/user/notifications/inbox`), subscriptions, campaigns, pots. Their request
+bodies are mostly shown only as auto-generated examples, which the reference
+itself says are "not accurate" — and the guide and schema disagreed on the
+purchase fields above, so check the *Schemas* section, not an example, before
+adding any of them, and confirm against a live request. Subscriptions/campaigns/
+pots also look like backend/admin surface rather than something a Unity client should call
 directly with an embedded API secret.
 
 ---
@@ -659,8 +683,11 @@ jiweWallet.GetGameData(result => {
   the player from doing anything else, consistent with §9's degrade-gracefully
   approach to failures generally.
 - This is **not a push notification** — it only reaches a player who has the
-  game open and happens to read Game Data at that moment. There's no way to
-  reach someone who isn't currently running the game.
+  game open and happens to read Game Data at that moment. Jiwe's reference does
+  list a notifications API (an admin `notifications/publish` plus a signed-in
+  player's inbox at `/user/notifications/inbox`) that could be a better fit for
+  messages that should persist; it isn't wired into this SDK yet and its schemas
+  haven't been read closely.
 
 ### Writing Game Data
 
@@ -692,6 +719,8 @@ real request before relying on it in production.
 | Response written after `HttpListener.Stop()` throws silently | `Stop()` called before the browser response finished writing | Already fixed in `LoginViaLoopback` — don't reorder if you touch it |
 | Login redirect fails / `redirect_uri` mismatch, only in Standalone/Editor | Random loopback port never matches your one fixed registered `redirect_uri` | Pin `GetFreeLoopbackPort()` to a constant port and register that exact URI — see §3 |
 | WebGL build "uploads fine" but shows a blank page / endless loading bar | Compression Format not Disabled, or (threaded builds only) missing COOP/COEP headers | See §8 |
+| `GetRewardsEarned` returns `403` | Token lacks the `rewards:read` scope | Set `JiweAuth.extraScopes = "rewards:read"` and enable it on the app form — refreshing won't help (§6) |
+| `GetRewardsEarned` returns `401` with a valid login | Access token isn't audienced to the Wallet API | Set `JiweAuth.walletResource` to your Wallet API resource identifier (§6) |
 | Player charged twice for one purchase | A retry generated a NEW `idempotencyKey` instead of reusing the one from the failed attempt | See §6 — persist and reuse the same key until the purchase settles |
 
 Still stuck (e.g. need your domain CORS-whitelisted, or an app-key issue)? Contact

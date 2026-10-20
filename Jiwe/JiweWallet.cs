@@ -12,7 +12,7 @@ namespace Jiwe
     /// [WIP]": abacus.jiwe.io/rest/api/v1/*).
     ///
     /// Two kinds of calls here:
-    ///   - Reward calls (XP / points / airtime) credit a specific PLAYER's
+    ///   - Reward calls (XP / airtime) credit a specific PLAYER's
     ///     account, so they need that player logged in via JiweAuth — the
     ///     X-API-TOKEN header is their id_token.
     ///   - Everything else (leaderboard, wallet balance, transaction status,
@@ -54,12 +54,6 @@ namespace Jiwe
         {
             var payload = new XpRewardPayload { xpEarned = xpEarned, description = description, gameSessionId = GameSessionId, metadata = new EmptyMetadata() };
             StartCoroutine(PostReward($"{BaseUrl}/rewards/xp", JsonUtility.ToJson(payload), onComplete));
-        }
-
-        public void GivePointsReward(int pointsEarned, string description, Action<JiweWalletResult> onComplete = null, string transactionId = null)
-        {
-            var payload = new PointsRewardPayload { pointsEarned = pointsEarned, description = description, gameSessionId = GameSessionId, transactionId = transactionId ?? Guid.NewGuid().ToString("N").Substring(0, 8), metadata = new EmptyMetadata() };
-            StartCoroutine(PostReward($"{BaseUrl}/rewards", JsonUtility.ToJson(payload), onComplete));
         }
 
         public void GiveAirtimeReward(int airtimeReward, string recipientNumber, string description, Action<JiweWalletResult> onComplete = null, string transactionId = null)
@@ -274,7 +268,6 @@ namespace Jiwe
 
         [Serializable] private class EmptyMetadata { }
         [Serializable] private class XpRewardPayload { public int xpEarned; public string description; public string gameSessionId; public EmptyMetadata metadata; }
-        [Serializable] private class PointsRewardPayload { public int pointsEarned; public string description; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class AirtimeRewardPayload { public int airtimeReward; public string description; public string recipientNumber; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class TransactionStatusPayload { public string transactionId; }
         [Serializable] private class LeaderboardRequestPayload { public string rewardType; public int maxEntries; public string leaderboardPeriod; public string bestPointsRanking; }

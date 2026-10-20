@@ -1,6 +1,6 @@
 # Jiwe Wallet SDK for Unity
 
-Log players into Jiwe with OAuth2 + PKCE, then credit them XP/points/airtime and read
+Log players into Jiwe with OAuth2 + PKCE, then credit them XP/airtime and read
 leaderboard/wallet data — against Jiwe's real, live API (`id.jiwe.io` for auth,
 `abacus.jiwe.io` for wallet calls).
 
@@ -64,8 +64,7 @@ flowchart TB
     subgraph LoginRequired["Require IdToken (player logged in)"]
         direction LR
         R1["GiveXpReward"]
-        R2["GivePointsReward"]
-        R3["GiveAirtimeReward"]
+        R2["GiveAirtimeReward"]
     end
     Static(["apiUsername / apiKey only"]) --> NoLoginNeeded
     Token(["apiUsername / apiKey\n+ player IdToken"]) --> LoginRequired
@@ -181,7 +180,6 @@ call-specific fields).
 | Method | Needs login? | Notes |
 |---|---|---|
 | `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | XP has no monetary value |
-| `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | "Cowrie" — Jiwe's in-game currency |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Min. 5 units; credits real airtime |
 | `GetLeaderboard(rewardType, maxEntries, period, bestPointsRanking, onComplete)` | No | `rewardType`: `"xp"`\|`"cowrie"`; `period`: `"day"`\|`"week"`\|`"month"`\|`"year"`\|`null` |
 | `GetWalletBalance(onComplete)` | No | Your app's own balance, not a player's |

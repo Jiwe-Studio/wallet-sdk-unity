@@ -10,16 +10,18 @@ namespace Jiwe
 {
     /// <summary>
     /// Player login for the Jiwe Wallet (OAuth2 Authorization Code + PKCE).
-    /// This produces the id_token that JiweWallet needs (as X-API-TOKEN) for
-    /// reward calls — it does NOT carry the X-API-USERNAME/X-API-KEY wallet
-    /// credentials, since those are static per-app values used on every
+    /// This produces the player token JiweWallet sends as X-API-TOKEN on
+    /// reward/purchase calls — it does NOT carry the X-API-USERNAME/X-API-KEY
+    /// wallet credentials, since those are static per-app values used on every
     /// wallet call (including ones that don't need a logged-in player, like
     /// the leaderboard) — see JiweWallet for those.
     ///
-    /// Endpoints are fixed per Jiwe's own docs (id.jiwe.io) and no longer need
-    /// to be typed into the Inspector per project. Only your OAuth client
-    /// credentials (from your Jiwe profile > Apps) are required:
-    ///   - clientId, apiSecret (used as the token endpoint's client_secret)
+    /// Endpoints default to production (id.jiwe.io) and don't need to be typed
+    /// into the Inspector; override them only for a non-production environment.
+    /// Only your OAuth client credentials (from your Jiwe profile > Apps) are
+    /// required:
+    ///   - clientId, and apiSecret if your app is a confidential client (how
+    ///     it's presented to the token endpoint is controlled by clientAuth)
     ///
     /// The redirect flow is different per platform (this is the one part of
     /// login that genuinely can't be unified — each platform requires a
@@ -38,33 +40,82 @@ namespace Jiwe
     /// </summary>
     public class JiweAuth : MonoBehaviour
     {
-        private const string AuthEndpoint = "https://id.jiwe.io/auth";
-        private const string TokenEndpoint = "https://id.jiwe.io/token";
-        private const string UserInfoEndpoint = "https://id.jiwe.io/me";
+        private const string DefaultAuthEndpoint = "https://id.jiwe.io/auth";
+        private const string DefaultTokenEndpoint = "https://id.jiwe.io/token";
+        private const string DefaultUserInfoEndpoint = "https://id.jiwe.io/me";
+        private string AuthEndpoint => string.IsNullOrWhiteSpace(authorizationEndpoint) ? DefaultAuthEndpoint : authorizationEndpoint.Trim();
+        private string TokenEndpoint => string.IsNullOrWhiteSpace(tokenEndpoint) ? DefaultTokenEndpoint : tokenEndpoint.Trim();
+        private string UserInfoEndpoint => string.IsNullOrWhiteSpace(userInfoEndpoint) ? DefaultUserInfoEndpoint : userInfoEndpoint.Trim();
         private const string Scope = "openid profile in-app-purchases rewards";
 
         [Header("Your Jiwe OAuth client credentials (Jiwe profile > Apps)")]
         public string clientId;
-        // Sent as the token endpoint's client_secret, in the POST BODY (not an Authorization: Basic
-        // header) — confirmed by testing that Jiwe's real token endpoint requires this on EVERY platform,
-        // including a pure PKCE mobile/deep-link flow. That's not textbook OAuth-spec "public client"
-        // behavior (PKCE exists specifically so a public/native client doesn't need a secret at all), but
-        // it's what their server actually expects — omitting it fails with a 401 invalid_client on mobile,
-        // confirmed live. Don't "fix" this away for security purity without re-confirming against a real
-        // token exchange first. This does mean the secret ships inside your compiled build (Android APK,
-        // WebGL bundle) — accept that tradeoff deliberately, and see the README for how to keep it out of
-        // source control at least (a gitignored local config asset, not a hardcoded value here).
+        // Your OAuth client secret. How it is presented to the token endpoint is controlled by clientAuth
+        // below, because Jiwe's server has been seen to want DIFFERENT things at different times and for
+        // different clients: Android (KentePunk, July) needed it in the form body and returned 401
+        // invalid_client without it; a hosted WebGL deploy (JiweChess, 2026-09-09) and a Node backend
+        // (Sheng Word League) both got a 400 "client authentication must only be provided using one
+        // mechanism" until it moved to an Authorization: Basic header with client_id/client_secret OUT of
+        // the body. Jiwe's docs only say a confidential client "authenticates itself with its client
+        // secret" and that a device-resident app "holds no secret". Leave this empty to send none (public
+        // client + PKCE, per the docs). A secret you set here ships inside your compiled build — keep it
+        // out of source control via a gitignored config asset (see the README).
         public string apiSecret;
+
+        public enum TokenClientAuth
+        {
+            /// <summary>Try an Authorization: Basic header first; if Jiwe rejects the client authentication, retry ONCE with the secret in the form body. Costs an extra request only on environments that want the body form.</summary>
+            Auto,
+            /// <summary>Authorization: Basic base64(clientId:apiSecret); client_id/client_secret are NOT also put in the body (sending both is rejected).</summary>
+            BasicHeader,
+            /// <summary>client_id and client_secret in the form body.</summary>
+            RequestBody
+        }
+        [Tooltip("How apiSecret is sent to the token endpoint. Auto tries Basic then falls back to the body once. Set it explicitly once you know which your environment wants — see the README troubleshooting table.")]
+        public TokenClientAuth clientAuth = TokenClientAuth.Auto;
 
         [Header("Android/iOS only — must be registered with Jiwe as a redirect_uri")]
         public string mobileRedirectScheme = "jiwewallet";
+
+        [Header("Standalone/Editor only — must be registered with Jiwe as a redirect_uri")]
+        [Tooltip("0 = pick a free port each login (the redirect_uri then changes every time, so it can't match a registered one). Set a fixed port, e.g. 53682, and register exactly http://127.0.0.1:53682/ with Jiwe. Must be a port that is free on the player's machine.")]
+        public int loopbackPort = 0;
+
+        [Header("Optional — only for GetRewardsEarned and other OIDC-bearer calls")]
+        [Tooltip("Extra space-separated scopes appended to the login request, e.g. \"rewards:read\". Leave empty to keep today's behaviour exactly. Every scope you list must ALSO be enabled on your app's registration form, or login can fail with access_denied.")]
+        public string extraScopes = "";
+        [Tooltip("Your Wallet API resource identifier (issued by Jiwe during onboarding). When set, it's sent as &resource= so the access token is audienced to the Wallet API — per Jiwe's docs, a token minted without it is for the default resource and Wallet calls return 401. Leave empty if you only use API-key calls.")]
+        public string walletResource = "";
+
+        [Header("Optional — WebGL redirect URI override")]
+        [Tooltip("WebGL only. Leave empty to use the page's own URL without its query string. Set this when your host serves the build under a path that changes per release, so the redirect URI you registered with Jiwe stays stable (it must match exactly, scheme/host/port/path). Must be a page that loads this game.")]
+        public string webglRedirectUri = "";
+
+        [Header("Optional — non-production environments only")]
+        [Tooltip("Leave all three empty for production (id.jiwe.io). Jiwe runs separate non-production environments with different issuers and credentials — use the endpoints Jiwe gives you for it. Jiwe's docs say to read these from {issuer}/.well-known/openid-configuration rather than hardcode them.")]
+        public string authorizationEndpoint = "";
+        public string tokenEndpoint = "";
+        public string userInfoEndpoint = "";
 
         [Header("Behaviour")]
         [Tooltip("Start login automatically on Awake. Turn off to call Login() yourself (e.g. from a menu button).")]
         public bool loginOnStart = true;
 
-        /// <summary>The id_token to send as the reward/purchase API's bearer token. Empty until login succeeds.</summary>
+        /// <summary>The id_token. Empty until login succeeds. JiweWallet sends it as X-API-TOKEN on API-key calls
+        /// unless <c>walletResource</c> is set (then the access token is sent instead — see
+        /// JiweWallet.playerTokenKind). Never send an ID token as an <c>Authorization: Bearer</c> value: Jiwe's
+        /// docs are explicit that it isn't audienced to an API.</summary>
         public string IdToken { get; private set; } = "";
+        /// <summary>The access_token from login. Used as the bearer for the "Hermes OIDC" calls
+        /// (<c>GetRewardsEarnedBearer</c>), and as X-API-TOKEN when <c>walletResource</c> is set. Empty until
+        /// login succeeds. Short-lived for the Wallet API audience (documented as 15 minutes) and a public
+        /// client can't get a refresh token, so this SDK does not refresh it — see
+        /// <see cref="IsAccessTokenExpired"/>.</summary>
+        public string AccessToken { get; private set; } = "";
+        /// <summary>When the access token expires (UTC), from the token response's expires_in. DateTime.MinValue if Jiwe didn't say.</summary>
+        public DateTime AccessTokenExpiresAtUtc { get; private set; } = DateTime.MinValue;
+        /// <summary>True once the access token's lifetime has passed. When it is, the right move is to send the player back through Login() — not to retry the failed call.</summary>
+        public bool IsAccessTokenExpired => AccessTokenExpiresAtUtc != DateTime.MinValue && DateTime.UtcNow >= AccessTokenExpiresAtUtc;
         public bool IsLoggedIn => !string.IsNullOrEmpty(IdToken);
         public JiweUserInfo UserInfo { get; private set; }
 
@@ -78,7 +129,21 @@ namespace Jiwe
         private string _codeVerifier;
         private string _state;
         private System.Net.HttpListener _activeListener; // set only while the Standalone/Editor loopback path is waiting — lets Cancel() unblock it
+        private bool _awaitingDeepLink; // set only while the Android/iOS deep-link path is waiting — same role as _activeListener above, but there's no object to Stop(); HandleDeepLink checks this instead
         private bool _cancelled;
+        private bool _loginInProgress; // re-entrancy guard — calling Login() again while one is already waiting on a redirect would start a second loopback listener/deep-link wait on top of the first, leaking state instead of replacing it
+
+        /// <summary>True from the moment Login() is called until it succeeds, fails, or is cancelled. Not required to use the SDK, but useful if your own UI wants to disable a "Log In" button (while still keeping Skip/Cancel live — see Cancel()) rather than relying on this SDK to silently ignore a double-tap.</summary>
+        public bool IsLoggingIn => _loginInProgress;
+
+        /// <summary>
+        /// Optional: take over opening the login URL, e.g. to show it in an in-app browser tab (Jiwe's docs
+        /// say a system or in-app browser tab — never an embedded web view, which breaks federated sign-in),
+        /// or to capture it in an automated test. Static, so set it once at startup. Null = Application.OpenURL.
+        /// Not used on WebGL, which navigates the current tab itself.
+        /// </summary>
+        public static Action<string> UrlOpener;
+        private static void OpenBrowser(string url) { if (UrlOpener != null) UrlOpener(url); else Application.OpenURL(url); }
 
         private const string WebGlVerifierKey = "jiwe_pkce_verifier";
         private const string WebGlStateKey = "jiwe_pkce_state";
@@ -108,12 +173,25 @@ namespace Jiwe
         public void Cancel()
         {
             _cancelled = true;
+            _loginInProgress = false;
+            _awaitingDeepLink = false; // see HandleDeepLink — a redirect that arrives after this point is treated as stale, not completed
             try { _activeListener?.Stop(); _activeListener?.Close(); } catch { /* already stopped/disposed — fine */ }
         }
 
-        /// <summary>Starts (or restarts) the login flow. Safe to call from a "Log in" button instead of relying on loginOnStart.</summary>
+        /// <summary>
+        /// Starts (or restarts) the login flow. Safe to call from a "Log in" button instead of relying on
+        /// loginOnStart. Ignored (with a warning) if a login is already in progress — call Cancel() first
+        /// if you want to restart rather than let this silently start a second, competing wait.
+        /// </summary>
         public void Login()
         {
+            if (_loginInProgress)
+            {
+                Debug.LogWarning("[JiweAuth] Login() called while one is already in progress — ignored. Call Cancel() first to restart.");
+                return;
+            }
+
+            _loginInProgress = true;
             _cancelled = false;
             _codeVerifier = RandomUrlSafe(32);
             _state = RandomUrlSafe(16);
@@ -132,9 +210,12 @@ namespace Jiwe
 
         private string BuildAuthUrl(string redirectUri, string codeChallenge)
         {
-            return $"{AuthEndpoint}?response_type=code&scope={Uri.EscapeDataString(Scope)}" +
+            string scope = string.IsNullOrWhiteSpace(extraScopes) ? Scope : $"{Scope} {extraScopes.Trim()}";
+            string url = $"{AuthEndpoint}?response_type=code&scope={Uri.EscapeDataString(scope)}" +
                    $"&redirect_uri={Uri.EscapeDataString(redirectUri)}&client_id={Uri.EscapeDataString(clientId)}" +
                    $"&state={_state}&code_challenge={codeChallenge}&code_challenge_method=S256";
+            if (!string.IsNullOrWhiteSpace(walletResource)) url += $"&resource={Uri.EscapeDataString(walletResource.Trim())}";
+            return url;
         }
 
         // ---------------------------------------------------------------
@@ -144,13 +225,13 @@ namespace Jiwe
         private async void LoginViaLoopback(string codeChallenge)
         {
             var listener = new System.Net.HttpListener();
-            int port = GetFreeLoopbackPort();
+            int port = loopbackPort > 0 ? loopbackPort : GetFreeLoopbackPort();
             string redirectUri = $"http://127.0.0.1:{port}/";
             listener.Prefixes.Add(redirectUri);
             listener.Start();
             _activeListener = listener;
 
-            Application.OpenURL(BuildAuthUrl(redirectUri, codeChallenge));
+            OpenBrowser(BuildAuthUrl(redirectUri, codeChallenge));
 
             System.Net.HttpListenerContext context;
             try
@@ -230,11 +311,20 @@ namespace Jiwe
         private void LoginViaDeepLink(string codeChallenge)
         {
             _pendingRedirectUri = $"{mobileRedirectScheme}://oauth-callback";
-            Application.OpenURL(BuildAuthUrl(_pendingRedirectUri, codeChallenge));
+            _awaitingDeepLink = true;
+            OpenBrowser(BuildAuthUrl(_pendingRedirectUri, codeChallenge));
         }
 
         private async void HandleDeepLink(string url)
         {
+            // GREY AREA FIXED: this used to process ANY deep link that arrived, even one that showed up
+            // after Cancel() — so a player who tapped Skip, assumed they'd moved on, and had the OS bring
+            // the app back to the foreground later (a slow/delayed redirect is a real possibility, not just
+            // theoretical) would silently get logged in anyway, well after their own UI had moved past the
+            // login screen. Now a stale/late redirect is explicitly ignored.
+            if (!_awaitingDeepLink) return;
+            _awaitingDeepLink = false;
+
             var query = ParseQuery(url);
             query.TryGetValue("error", out string error);
             query.TryGetValue("code", out string code);
@@ -254,27 +344,50 @@ namespace Jiwe
         // WebGL: same-tab full-page redirect
         // ---------------------------------------------------------------
 #if UNITY_WEBGL
+        // Three WebGL-specific traps, all found by live testing (JiweChess, 2026-09-09), all handled by
+        // Plugins/WebGL/JiweStorage.jslib:
+        //  1. Application.OpenURL on WebGL ALWAYS opens a NEW tab (window.open _blank). This flow needs
+        //     the SAME tab — Jiwe redirects back to this page — so the original tab sat on "Signing in..."
+        //     forever while a second tab logged in with nobody listening. We navigate in place instead.
+        //  2. PlayerPrefs on WebGL is IndexedDB-backed and asynchronous even after Save(); the page can
+        //     unload before the PKCE verifier is flushed, so the token exchange later has no verifier.
+        //     localStorage.setItem is synchronous, so the verifier/state go there.
+        //  3. After the redirect the address bar still holds ?code=...; a refresh would replay a
+        //     single-use code, so the query is stripped once it's been read.
         private void LoginViaWebRedirect(string codeChallenge)
         {
-            string redirectUri = GetPageUrlWithoutQuery();
+            string redirectUri = GetWebRedirectUri();
 #if !UNITY_EDITOR
-            PlayerPrefs.SetString(WebGlVerifierKey, _codeVerifier);
-            PlayerPrefs.SetString(WebGlStateKey, _state);
-            PlayerPrefs.Save();
-#endif
+            JiweStorage_SetItem(WebGlVerifierKey, _codeVerifier);
+            JiweStorage_SetItem(WebGlStateKey, _state);
+            JiweStorage_NavigateTo(BuildAuthUrl(redirectUri, codeChallenge));
+#else
             Application.OpenURL(BuildAuthUrl(redirectUri, codeChallenge));
+#endif
         }
 
 #if !UNITY_EDITOR
+        [System.Runtime.InteropServices.DllImport("__Internal")] private static extern void JiweStorage_SetItem(string key, string value);
+        [System.Runtime.InteropServices.DllImport("__Internal")] private static extern string JiweStorage_GetItem(string key);
+        [System.Runtime.InteropServices.DllImport("__Internal")] private static extern void JiweStorage_RemoveItem(string key);
+        [System.Runtime.InteropServices.DllImport("__Internal")] private static extern void JiweStorage_ClearUrlQuery();
+        [System.Runtime.InteropServices.DllImport("__Internal")] private static extern void JiweStorage_NavigateTo(string url);
+
         private bool TryResumeWebGlRedirect()
         {
             var query = ParseQuery(Application.absoluteURL);
             if (!query.ContainsKey("code") && !query.ContainsKey("error")) return false;
 
-            _codeVerifier = PlayerPrefs.GetString(WebGlVerifierKey, "");
-            _state = PlayerPrefs.GetString(WebGlStateKey, "");
-            PlayerPrefs.DeleteKey(WebGlVerifierKey);
-            PlayerPrefs.DeleteKey(WebGlStateKey);
+            // This is a fresh page load (a new script instance after the full-page redirect), so
+            // IsLoggingIn would otherwise incorrectly read false here even while the exchange below is
+            // genuinely in flight — this path never goes through Login(), which is the only other place
+            // that sets it.
+            _loginInProgress = true;
+            _codeVerifier = JiweStorage_GetItem(WebGlVerifierKey);
+            _state = JiweStorage_GetItem(WebGlStateKey);
+            JiweStorage_RemoveItem(WebGlVerifierKey);
+            JiweStorage_RemoveItem(WebGlStateKey);
+            JiweStorage_ClearUrlQuery();
 
             query.TryGetValue("error", out string error);
             query.TryGetValue("code", out string code);
@@ -286,16 +399,17 @@ namespace Jiwe
                 return true;
             }
 
-            _ = ExchangeCodeForToken(validCode, GetPageUrlWithoutQuery());
+            _ = ExchangeCodeForToken(validCode, GetWebRedirectUri());
             return true;
         }
 #endif
 
-        private static string GetPageUrlWithoutQuery()
+        private string GetWebRedirectUri()
         {
+            if (!string.IsNullOrWhiteSpace(webglRedirectUri)) return webglRedirectUri.Trim();
             string url = Application.absoluteURL;
-            int qIndex = url.IndexOf('?');
-            return qIndex >= 0 ? url.Substring(0, qIndex) : url;
+            int cut = url.IndexOfAny(new[] { '?', '#' });
+            return cut >= 0 ? url.Substring(0, cut) : url;
         }
 #endif
 
@@ -313,30 +427,67 @@ namespace Jiwe
             return true;
         }
 
-        private async Task ExchangeCodeForToken(string code, string redirectUri)
+        private class TokenAttempt { public bool TimedOut; public bool Ok; public long Status; public string Body; public string Error; }
+
+        private async Task<TokenAttempt> SendTokenRequest(string code, string redirectUri, bool basicHeader)
         {
             var form = new Dictionary<string, string>
             {
                 { "grant_type", "authorization_code" },
                 { "code", code },
                 { "redirect_uri", redirectUri },
-                { "client_id", clientId },
-                { "client_secret", apiSecret },
                 { "code_verifier", _codeVerifier }
             };
+            bool hasSecret = !string.IsNullOrEmpty(apiSecret);
+            // No secret = a public client (PKCE only): client_id in the body, nothing to authenticate with.
+            if (!hasSecret || !basicHeader)
+            {
+                form["client_id"] = clientId;
+                if (hasSecret) form["client_secret"] = apiSecret;
+            }
 
             using var req = UnityWebRequest.Post(TokenEndpoint, form);
-            if (!await WaitBounded(req)) { Fail(_cancelled ? "Login cancelled." : "Token exchange timed out — no response from Jiwe."); return; }
+            if (hasSecret && basicHeader)
+                req.SetRequestHeader("Authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{apiSecret}")));
 
-            if (req.result != UnityWebRequest.Result.Success)
+            if (!await WaitBounded(req)) return new TokenAttempt { TimedOut = true };
+            return new TokenAttempt
             {
-                // req.error alone is just the raw HTTP status line (e.g. "HTTP/1.1 401 Unauthorized") — no
-                // indication of why. OAuth token endpoints almost always return a JSON error body
-                // ({error, error_description}) even on a 4xx; surface that instead whenever present. Found
-                // the hard way: this was the only thing that made a real invalid_client failure
-                // diagnosable at all (it turned out Jiwe's token endpoint requires client_secret in the
-                // body — see the field comment on apiSecret above — omitting it fails exactly like this).
-                string detail = req.downloadHandler?.text;
+                Ok = req.result == UnityWebRequest.Result.Success,
+                Status = req.responseCode,
+                Body = req.downloadHandler?.text,
+                Error = req.error
+            };
+        }
+
+        // The two failure signatures seen from Jiwe when client authentication is presented the wrong way:
+        // 401 invalid_client, and 400 "client authentication must only be provided using one mechanism".
+        private static bool LooksLikeClientAuthRejection(TokenAttempt a)
+        {
+            if (a.Ok) return false;
+            if (a.Status == 401) return true;
+            string b = a.Body ?? "";
+            return a.Status == 400 && (b.Contains("client authentication") || b.Contains("mechanism") || b.Contains("invalid_client"));
+        }
+
+        private async Task ExchangeCodeForToken(string code, string redirectUri)
+        {
+            bool basicFirst = clientAuth != TokenClientAuth.RequestBody;
+            var attempt = await SendTokenRequest(code, redirectUri, basicFirst);
+            if (!attempt.TimedOut && clientAuth == TokenClientAuth.Auto && !string.IsNullOrEmpty(apiSecret) && LooksLikeClientAuthRejection(attempt))
+            {
+                Debug.Log("[JiweAuth] Token endpoint rejected the client authentication — retrying once with the secret in the request body. Set JiweAuth.clientAuth explicitly to skip this.");
+                attempt = await SendTokenRequest(code, redirectUri, !basicFirst);
+            }
+
+            if (attempt.TimedOut) { Fail(_cancelled ? "Login cancelled." : "Token exchange timed out — no response from Jiwe."); return; }
+
+            if (!attempt.Ok)
+            {
+                // The raw status line alone (e.g. "HTTP/1.1 401 Unauthorized") says nothing about why. OAuth
+                // token endpoints almost always return a JSON error body ({error, error_description}) even
+                // on a 4xx; surface that instead whenever present.
+                string detail = attempt.Body;
                 if (!string.IsNullOrEmpty(detail))
                 {
                     try
@@ -345,19 +496,19 @@ namespace Jiwe
                         if (!string.IsNullOrEmpty(oauthError?.error))
                         {
                             string desc = !string.IsNullOrEmpty(oauthError.error_description) ? $": {oauthError.error_description}" : "";
-                            Fail($"Token exchange failed: {oauthError.error}{desc} ({req.error})");
+                            Fail($"Token exchange failed: {oauthError.error}{desc} ({attempt.Error})");
                             return;
                         }
                     }
                     catch (Exception) { /* body wasn't the expected OAuth error shape — fall through */ }
-                    Fail($"Token exchange failed: {req.error} — {detail}");
+                    Fail($"Token exchange failed: {attempt.Error} — {detail}");
                     return;
                 }
-                Fail($"Token exchange failed: {req.error}");
+                Fail($"Token exchange failed: {attempt.Error}");
                 return;
             }
 
-            var token = JsonUtility.FromJson<TokenResponse>(req.downloadHandler.text);
+            var token = JsonUtility.FromJson<TokenResponse>(attempt.Body);
             if (string.IsNullOrEmpty(token.id_token))
             {
                 Fail("Token response had no id_token.");
@@ -365,24 +516,57 @@ namespace Jiwe
             }
 
             IdToken = token.id_token;
+            AccessToken = token.access_token;
+            AccessTokenExpiresAtUtc = token.expires_in > 0 ? DateTime.UtcNow.AddSeconds(token.expires_in) : DateTime.MinValue;
+            // Profile claims ride in the ID token itself. Jiwe's /me endpoint has been seen rejecting every
+            // token (confirmed live 2026-09-14), so don't depend on it for the player's name.
+            UserInfo = DecodeIdTokenClaims(token.id_token) ?? new JiweUserInfo();
             await FetchUserInfo(token.access_token);
+            _loginInProgress = false;
             OnLoginSuccess?.Invoke();
+        }
+
+        // Reads the claims out of the ID token we just received directly from the token endpoint over TLS.
+        // Deliberately NOT signature-verified — that is a server's job when it accepts a token from someone
+        // else; here it only seeds display fields (sub, name, nickname, bio, picture, walletId).
+        private static JiweUserInfo DecodeIdTokenClaims(string idToken)
+        {
+            try
+            {
+                var parts = idToken.Split('.');
+                if (parts.Length < 2) return null;
+                string payload = parts[1].Replace('-', '+').Replace('_', '/');
+                payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+                return JsonUtility.FromJson<JiweUserInfo>(Encoding.UTF8.GetString(Convert.FromBase64String(payload)));
+            }
+            catch (Exception) { return null; }
         }
 
         private async Task FetchUserInfo(string accessToken)
         {
             using var req = UnityWebRequest.Get(UserInfoEndpoint);
             req.SetRequestHeader("Authorization", $"Bearer {accessToken}");
-            if (!await WaitBounded(req)) return; // best-effort — timeout/cancel here just skips the display-name refresh, login itself already succeeded
+            if (!await WaitBounded(req)) return; // best-effort — a failure here (including /me rejecting the token) only skips filling in fields the ID token lacked; login itself already succeeded
 
             if (req.result == UnityWebRequest.Result.Success)
             {
-                UserInfo = JsonUtility.FromJson<JiweUserInfo>(req.downloadHandler.text);
+                var fresh = JsonUtility.FromJson<JiweUserInfo>(req.downloadHandler.text);
+                if (fresh == null) return;
+                UserInfo ??= new JiweUserInfo();
+                if (string.IsNullOrEmpty(UserInfo.sub)) UserInfo.sub = fresh.sub;
+                if (string.IsNullOrEmpty(UserInfo.name)) UserInfo.name = fresh.name;
+                if (string.IsNullOrEmpty(UserInfo.nickname)) UserInfo.nickname = fresh.nickname;
+                if (string.IsNullOrEmpty(UserInfo.bio)) UserInfo.bio = fresh.bio;
+                if (string.IsNullOrEmpty(UserInfo.picture)) UserInfo.picture = fresh.picture;
             }
         }
 
         private void Fail(string message)
         {
+            _loginInProgress = false;
+            // OAuth/server error bodies can occasionally be a full HTML error page (e.g. a proxy/firewall
+            // block) rather than JSON — cap length so that never turns into a wall of text in a UI label.
+            if (message.Length > 300) message = message.Substring(0, 300) + "…";
             Debug.LogWarning($"[JiweAuth] {message}");
             OnLoginFailed?.Invoke(message);
         }
@@ -449,5 +633,8 @@ namespace Jiwe
         public string name;
         public string nickname;
         public string bio;
+        public string picture;
+        /// <summary>Wallet identifier claim — present when the rewards or in-app-purchases scope was granted.</summary>
+        public string walletId;
     }
 }

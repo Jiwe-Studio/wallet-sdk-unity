@@ -76,17 +76,6 @@ namespace Jiwe.Tests
         }
 
         [UnityTest]
-        public IEnumerator GivePoints_SendsAGeneratedTransactionId()
-        {
-            yield return LoginOk();
-            var r = new Box<JiweWalletResult>(); wallet.GivePointsReward(20, "Boss 1", r.Callback); yield return r.Wait();
-            Assert.IsTrue(r.Value.Success, r.Value.Error);
-            var body = Requests("/rewards", "POST").Single(x => x.path.EndsWith("/rewards")).body;
-            StringAssert.Contains("\"pointsEarned\":20", body);
-            Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(body, "\"transactionId\":\"[0-9a-f]{8}\""), body);
-        }
-
-        [UnityTest]
         public IEnumerator Airtime_IsAcceptedNotSettled_ThenSettlesViaTransactionStatus()
         {
             yield return LoginOk();

@@ -83,12 +83,6 @@ namespace Jiwe
             StartCoroutine(PostReward($"{BaseUrl}/rewards/xp", json, onComplete));
         }
 
-        public void GivePointsReward(int pointsEarned, string description, Action<JiweWalletResult> onComplete = null, string transactionId = null)
-        {
-            var payload = new PointsRewardPayload { pointsEarned = pointsEarned, description = description, gameSessionId = GameSessionId, transactionId = transactionId ?? Guid.NewGuid().ToString("N").Substring(0, 8), metadata = new EmptyMetadata() };
-            StartCoroutine(PostReward($"{BaseUrl}/rewards", JsonUtility.ToJson(payload), onComplete));
-        }
-
         public void GiveAirtimeReward(int airtimeReward, string recipientNumber, string description, Action<JiweWalletResult> onComplete = null, string transactionId = null)
         {
             var payload = new AirtimeRewardPayload { airtimeReward = airtimeReward, description = description, recipientNumber = recipientNumber, gameSessionId = GameSessionId, transactionId = transactionId ?? Guid.NewGuid().ToString("N").Substring(0, 8), metadata = new EmptyMetadata() };
@@ -567,7 +561,6 @@ namespace Jiwe
         [Serializable] private class EmptyMetadata { }
         [Serializable] private class XpRewardWithRefPayload { public int xpEarned; public string description; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class XpRewardPayload { public int xpEarned; public string description; public string gameSessionId; public EmptyMetadata metadata; }
-        [Serializable] private class PointsRewardPayload { public int pointsEarned; public string description; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class AirtimeRewardPayload { public int airtimeReward; public string description; public string recipientNumber; public string gameSessionId; public string transactionId; public EmptyMetadata metadata; }
         [Serializable] private class TransactionStatusPayload { public string transactionId; }
         [Serializable] private class PurchasePayload { public int amount; public string itemId; public string description; public EmptyMetadata metadata; }

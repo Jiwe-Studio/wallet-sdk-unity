@@ -18,6 +18,10 @@ Compared with the SDK as it stood on `main` before this release.
 - **`JiweWallet` sends `X-API-TOKEN` as before (ID token) unless `JiweAuth.walletResource`
   is set**, in which case it sends the access token. Override with `playerTokenKind`.
 
+- **Removed `GivePointsReward`** (`POST /rewards`). For apps whose float is on the Cowrie reward
+  ledger the route fails with "This operation moves money…", and Abacus has dropped it from the
+  public OpenAPI contract. Use `GiveXpReward` or `GiveAirtimeReward`. Same change as PR #6.
+
 ## Added
 
 - `PurchaseWithWallet`, `GetPurchaseStatus` — in-app purchases with a required idempotency key

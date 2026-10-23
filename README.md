@@ -73,9 +73,8 @@ flowchart TB
     subgraph LoginRequired["Require IdToken (player logged in)"]
         direction LR
         R1["GiveXpReward"]
-        R2["GivePointsReward"]
-        R3["GiveAirtimeReward"]
-        R4["PurchaseWithWallet"]
+        R2["GiveAirtimeReward"]
+        R3["PurchaseWithWallet"]
     end
     subgraph BearerOnly["A THIRD boundary — no apiUsername/apiKey at all"]
         direction LR
@@ -206,7 +205,6 @@ reference but we haven't exercised it ourselves — verify before depending on i
 | Method | Login? | Evidence | Notes |
 |---|---|---|---|
 | `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | Live | XP has no monetary value. `transactionId` is only sent if you pass one |
-| `GivePointsReward(points, description, onComplete, transactionId?)` | Yes | Docs | "Cowrie" points. Auto-generates a `transactionId` |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Live | Min. 5 units; real airtime, asynchronous — see §6 |
 | `PurchaseWithWallet(amount, itemId, description, idempotencyKey, onComplete)` | Yes | Live | Debits the player's own balance. `idempotencyKey` is not optional — §6 |
 | `GetPurchaseStatus(paymentOrderId, onComplete)` | Yes | Docs | Poll a purchase by the `PaymentOrderId` from its result |

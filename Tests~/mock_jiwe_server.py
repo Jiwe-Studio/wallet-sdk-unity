@@ -381,15 +381,13 @@ class Handler(BaseHTTPRequestHandler):
                 ]
             return self.send_json(200, {"type": "OK", "leaderboard": rows[: int(req.get("maxEntries") or 10)], "totalEntries": len(rows)})
 
-        if rel in ("rewards/xp", "rewards", "rewards/airtime") and method == "POST":
+        if rel in ("rewards/xp", "rewards/airtime") and method == "POST":
             if not self._api_key_ok(): return
             if self._player() is None: return
             req = self._json(body)
             if req is None: return self.err(400, "invalid JSON")
             if rel == "rewards/xp" and not (isinstance(req.get("xpEarned"), int) and req["xpEarned"] > 0):
                 return self.err(400, "xpEarned should be greater than 0")
-            if rel == "rewards" and not (isinstance(req.get("pointsEarned"), int) and req["pointsEarned"] > 0):
-                return self.err(400, "pointsEarned should be greater than 0")
             if rel == "rewards/airtime":
                 if not (isinstance(req.get("airtimeReward"), int) and req["airtimeReward"] >= 5):
                     return self.err(400, "airtimeReward should be at least 5")
@@ -397,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.err(400, "recipientNumber is required")
             tid = str(uuid.uuid4())
             S["txns"][tid] = {"status": "PENDING" if rel == "rewards/airtime" else "POSTED", "polls": 0}
-            msg = {"rewards/xp": "XP processed successfully", "rewards": "Reward request submitted successfully.",
+            msg = {"rewards/xp": "XP processed successfully",
                    "rewards/airtime": "Airtime reward sent successfully."}[rel]
             return self.send_json(202 if rel == "rewards/airtime" else 200, {"type": "SUCCESS", "message": msg, "ledger_transaction_id": tid})
 

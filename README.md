@@ -187,6 +187,11 @@ jiweAuth.OnLoginSuccess += () => {
 };
 ```
 
+**Want a working starting point instead?** [`Samples/`](Samples) has seven drop-in starters taken from our
+shipped games — guest-first setup, XP + leaderboard, an update gate, a cosmetic shop, cloud saves, an airtime
+milestone, and a server in front of Jiwe. Each is one component that draws its own UI, so add it to a
+GameObject and press Play. See [Samples/README.md](Samples/README.md).
+
 ---
 
 ## 5. API reference
@@ -1004,9 +1009,12 @@ you're on WebGL, see §8 before your first upload.
 
 ---
 
-## Use cases
+## Samples, use cases and tests
 
-Real code from three shipped games lives in [docs/use-cases.md](docs/use-cases.md):
+**[Samples/](Samples)** — seven runnable starters, one per pattern, each taken from a shipped game. Pick by what a
+forged call would cost you; the table in [Samples/README.md](Samples/README.md) says which to start from.
+
+**[docs/use-cases.md](docs/use-cases.md)** — the same games as write-ups with the code and the mistakes each one made:
 
 | Game | Shape | What you'll find |
 |---|---|---|
@@ -1014,8 +1022,10 @@ Real code from three shipped games lives in [docs/use-cases.md](docs/use-cases.m
 | **Sheng Word League** (web + Node/Express) | A server in front of Jiwe | Server-side sign-in, reading the profile from the ID token, charging the wallet and classifying failures, reserve-before-pay, key-by-`sub`, mock modes |
 | **JiweChess** (Unity WebGL) | Guest-first | Credentials bootstrap and execution order, sign-in only on demand with a Cancel, XP that no-ops for guests, the WebGL redirect lessons |
 
-Start with the table at the top of that page to pick the shape that matches what a forged
-call would cost you.
+**[Tests~/](Tests~)** — the SDK and every sample run against a mock Jiwe server (`Tests~/run-tests.sh`), the WebGL
+login runs in a real browser (`Tests~/webgl/run-webgl-e2e.sh`), and an opt-in read-only smoke test can check your own
+credentials against the real API. The suite was mutation-tested: ten deliberate bugs in the SDK each turned it red.
+What passing does and doesn't prove is written down in [Tests~/README.md](Tests~/README.md).
 
 ---
 

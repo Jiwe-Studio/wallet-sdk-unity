@@ -34,7 +34,13 @@ Compared with the SDK as it stood on `main` before this release.
   `clientAuth`, `AccessToken`, `AccessTokenExpiresAtUtc`, `IsAccessTokenExpired`,
   `IsLoggingIn`, and endpoint overrides for non-production environments.
 - `JiweWallet.walletBaseUrl` for non-production environments.
+- `JiweAuth.UrlOpener` — take over opening the login URL (an in-app browser tab, or a test).
+- `PurchaseWithWallet` fails fast, with a clear message and no request, if `idempotencyKey` is empty or over 200 characters.
+- `Samples/` — seven drop-in starters (guest-first bootstrap, XP + leaderboard, update gate, cosmetic shop, cloud
+  save, airtime claim, server-in-front-of-Jiwe with a dependency-free Node server).
 - `docs/use-cases.md` — code from KentePunk, Sheng Word League and JiweChess.
+- `Tests~/` — a mock Jiwe server, a PlayMode suite for the SDK and every sample, a Node test for the WebGL plugin,
+  a headless-Chrome WebGL end-to-end, and an opt-in read-only live smoke test.
 
 ## Documentation
 
@@ -44,8 +50,9 @@ Compared with the SDK as it stood on `main` before this release.
 
 ## Not changed / known gaps
 
-- Not compiled against every Unity version and not run against live Jiwe from this change:
-  it compiles cleanly against Unity 6000.0.41f1 for Standalone, WebGL, Android and iOS
-  define sets. Marked **Docs** (not **Live**) in README §5 where we haven't exercised a call.
+- **Tested, with limits.** The suite runs on Unity 6000.0.41f1 against a mock of Jiwe (see `Tests~/README.md`
+  for what that does and doesn't prove). The code also compiles cleanly for the Standalone, WebGL, Android and iOS
+  define sets. Not tested: login against the real `id.jiwe.io`, Android/iOS deep-link login, other Unity versions.
+  Methods marked **Docs** (not **Live**) in README §5 are the ones no shipped game has exercised.
 - `rewards/cowrie`, `rewards/data`, wallet-funded airtime/data purchases, notifications and
   the subscriptions/campaigns/pots surface are deliberately not wrapped (README §6).

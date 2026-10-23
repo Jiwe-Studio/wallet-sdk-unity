@@ -136,6 +136,15 @@ namespace Jiwe
         /// <summary>True from the moment Login() is called until it succeeds, fails, or is cancelled. Not required to use the SDK, but useful if your own UI wants to disable a "Log In" button (while still keeping Skip/Cancel live — see Cancel()) rather than relying on this SDK to silently ignore a double-tap.</summary>
         public bool IsLoggingIn => _loginInProgress;
 
+        /// <summary>
+        /// Optional: take over opening the login URL, e.g. to show it in an in-app browser tab (Jiwe's docs
+        /// say a system or in-app browser tab — never an embedded web view, which breaks federated sign-in),
+        /// or to capture it in an automated test. Static, so set it once at startup. Null = Application.OpenURL.
+        /// Not used on WebGL, which navigates the current tab itself.
+        /// </summary>
+        public static Action<string> UrlOpener;
+        private static void OpenBrowser(string url) { if (UrlOpener != null) UrlOpener(url); else Application.OpenURL(url); }
+
         private const string WebGlVerifierKey = "jiwe_pkce_verifier";
         private const string WebGlStateKey = "jiwe_pkce_state";
 
@@ -222,7 +231,7 @@ namespace Jiwe
             listener.Start();
             _activeListener = listener;
 
-            Application.OpenURL(BuildAuthUrl(redirectUri, codeChallenge));
+            OpenBrowser(BuildAuthUrl(redirectUri, codeChallenge));
 
             System.Net.HttpListenerContext context;
             try
@@ -303,7 +312,7 @@ namespace Jiwe
         {
             _pendingRedirectUri = $"{mobileRedirectScheme}://oauth-callback";
             _awaitingDeepLink = true;
-            Application.OpenURL(BuildAuthUrl(_pendingRedirectUri, codeChallenge));
+            OpenBrowser(BuildAuthUrl(_pendingRedirectUri, codeChallenge));
         }
 
         private async void HandleDeepLink(string url)

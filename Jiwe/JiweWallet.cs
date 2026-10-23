@@ -359,6 +359,12 @@ namespace Jiwe
 
         private IEnumerator PostPurchase(string jsonPayload, string idempotencyKey, Action<JiwePurchaseResult> onComplete)
         {
+            if (string.IsNullOrEmpty(idempotencyKey) || idempotencyKey.Length > 200)
+            {
+                onComplete?.Invoke(new JiwePurchaseResult { Success = false, Error = "idempotencyKey is required (1-200 characters): generate one per purchase attempt and reuse it on retries." });
+                yield break;
+            }
+
             if (auth == null || !auth.IsLoggedIn)
             {
                 onComplete?.Invoke(new JiwePurchaseResult { Success = false, Error = "Not logged in to Jiwe — call JiweAuth.Login() first." });

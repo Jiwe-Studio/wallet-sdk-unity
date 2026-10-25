@@ -1,17 +1,17 @@
 # Use cases from shipped Jiwe games
 
-Three games, three different shapes. Each section says what the game uses Jiwe for, shows
+Four games, four different shapes. Each section says what the game uses Jiwe for, shows
 the code that does it, and lists what went wrong along the way. Snippets labelled
 **verbatim** are copied from the game with only secrets and unrelated lines removed;
 snippets labelled **adapted** are the same calls written against this SDK (KentePunk
 wraps the same endpoints in a client of its own).
 
-| | [KentePunk](#1-kentepunk--a-unity-mobile-game-with-no-backend) | [Sheng Word League](#2-sheng-word-league--a-web-game-with-a-backend-in-front-of-jiwe) | [JiweChess](#3-jiwechess--a-unity-webgl-game-that-is-guest-first) |
-|---|---|---|---|
-| Platform | Unity, Android | Browser (React) + Node/Express | Unity WebGL |
-| Backend of its own | **None** | **Yes** — holds the Jiwe keys | None |
-| Uses Jiwe for | XP + leaderboard, airtime milestone, cosmetics, cloud save, update gate | XP, airtime prizes, cowrie purchases, daily pool, leaderboards | Sign-in, XP, leaderboard |
-| Trust model | Client calls Jiwe directly; caps are advisory | Server validates, then calls Jiwe; caps are enforced | Sign-in only when a feature needs it |
+| | [KentePunk](#1-kentepunk--a-unity-mobile-game-with-no-backend) | [Sheng Word League](#2-sheng-word-league--a-web-game-with-a-backend-in-front-of-jiwe) | [JiweChess](#3-jiwechess--a-unity-webgl-game-that-is-guest-first) | [Paws for Inspection](#4-paws-for-inspection--a-static-web-game-with-a-small-server-beside-it) |
+|---|---|---|---|---|
+| Platform | Unity, Android | Browser (React) + Node/Express | Unity WebGL | Browser (vanilla JS) + one Node file |
+| Backend of its own | **None** | **Yes** — holds the Jiwe keys | None | **Yes** — same origin as the game, holds the keys |
+| Uses Jiwe for | XP + leaderboard, airtime milestone, cosmetics, cloud save, update gate | XP, airtime prizes, cowrie purchases, daily pool, leaderboards | Sign-in, XP, leaderboard | Sign-in, XP per level by grade, XP leaderboard |
+| Trust model | Client calls Jiwe directly; caps are advisory | Server validates, then calls Jiwe; caps are enforced | Sign-in only when a feature needs it | Server sets every amount; replays earn only the difference |
 
 **Want to run one?** Each pattern below has a drop-in starter in [`Samples/`](../Samples) — add the component to a
 GameObject and press Play.
@@ -435,7 +435,41 @@ public void GetLeaderboard(string period, int max, Action<JiweLeaderboardResult>
 
 ---
 
-## Patterns that held across all three
+## 4. Paws for Inspection — a static web game with a small server beside it
+
+An airport animal-customs game in plain HTML/CSS/JS with no build step, served from its own
+pod at `quirklog.com/games/paws-for-inspection/`. Players clear ten story levels ("shifts"),
+each graded S to D; Jiwe adds sign-in, XP per cleared level and an XP leaderboard. **Status:
+built and tested against a fake Jiwe; the leaderboard read was checked live; the first live
+login and XP award are pending** — read its rows here as "built", not "proven".
+
+The whole integration is written up step by step, with verbatim code, in
+**[web-integration.md](web-integration.md)**. The short version:
+
+- **One Node process, same origin.** It replaced nginx: it serves the game files and four
+  routes under `api/` (`config`, `auth/token`, `xp`, `leaderboard`). No CORS anywhere, and no
+  request to Jiwe to whitelist a domain.
+- **Browser-driven PKCE, server-side code swap.** The page holds only the Client ID; the
+  server swaps the code with Basic auth and reads the profile from the ID token.
+- **The server decides what a result is worth.** The browser reports "shift 3, grade S"; a
+  server table turns that into 50 XP, and a replay only earns the difference to the best
+  grade already paid.
+- **Switched on by the server.** `GET api/config` reports whether the four keys are present,
+  so the same image runs with Jiwe off until the Kubernetes Secret exists.
+- **Leaderboard ranked locally**, cached 30 s, with a percentile only from 20 players up.
+
+### What Paws for Inspection learned (so far)
+
+- A static game doesn't need a second service for its keys: if it already runs on a server
+  you control, put four routes beside the files.
+- Pick the Jiwe credential screen's values carefully: Client ID to the browser, the other
+  three to the server, the API key saved the moment it's shown.
+- A manifest change the CI can't apply (an `envFrom` Secret, more memory for Node) must go
+  in by hand **before** the image that needs it.
+
+---
+
+## Patterns that held across all of them
 
 1. **Fail open on every startup check.** An update gate, a pool check, a profile fetch:
    only a definite answer from Jiwe blocks the player.

@@ -24,6 +24,9 @@ Compared with the SDK as it stood on `main` before this release.
 
 ## Added
 
+- `docs/web-integration.md`: integrating Jiwe from a web game without the SDK, written from
+  Swahili Word League and Paws for Inspection. Paws for Inspection added to `docs/use-cases.md`.
+
 - `PurchaseWithWallet`, `GetPurchaseStatus` — in-app purchases with a required idempotency key
   (README §6). Request fields: `amount`, `itemId`, `description`, `metadata`.
 - `GetRewardsEarned` (API key + player token; lifetime earned totals, not a balance) and

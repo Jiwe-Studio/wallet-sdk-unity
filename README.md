@@ -9,6 +9,10 @@ Two scripts and one WebGL plugin, no dependencies: `JiweAuth.cs` handles login,
 WebGL login redirect work. Copy the whole `Jiwe/` folder into `Assets/` and you're done
 importing.
 
+**Building a web game without Unity?** You don't need this SDK: call the same API with
+`fetch` from a small server of your own. [docs/web-integration.md](docs/web-integration.md)
+walks through it with code from two live Jiwe web games.
+
 **Where this SDK sits relative to Jiwe's docs.** Jiwe publishes its API at
 [developers.jiwe.io](https://developers.jiwe.io) (sign-in required). That site is the
 source of truth for what the API *accepts*; this SDK is the source for what has been
@@ -1019,6 +1023,10 @@ forged call would cost you; the table in [Samples/README.md](Samples/README.md) 
 | **KentePunk** (Unity, Android) | Client-only, no backend | Update gate (rotated keys + `minVersion`), XP reporting, sorted leaderboard with per-player levels, airtime claim with a pool pre-check, skin purchases with a persisted idempotency key, cloud save |
 | **Sheng Word League** (web + Node/Express) | A server in front of Jiwe | Server-side sign-in, reading the profile from the ID token, charging the wallet and classifying failures, reserve-before-pay, key-by-`sub`, mock modes |
 | **JiweChess** (Unity WebGL) | Guest-first | Credentials bootstrap and execution order, sign-in only on demand with a Cancel, XP that no-ops for guests, the WebGL redirect lessons |
+| **Paws for Inspection** (vanilla JS + Node) | A small server on the game's own origin | Browser PKCE with a server-side code swap, XP set by the server per grade, replays paying only the difference, a ranked leaderboard, keys from a Kubernetes Secret |
+
+**[docs/web-integration.md](docs/web-integration.md)** — the web guide: credentials, redirect URIs, login, XP,
+leaderboard, deployment and a security checklist for a browser game with no SDK.
 
 **[Tests~/](Tests~)** — the SDK and every sample run against a mock Jiwe server (`Tests~/run-tests.sh`), the WebGL
 login runs in a real browser (`Tests~/webgl/run-webgl-e2e.sh`), and an opt-in read-only smoke test can check your own

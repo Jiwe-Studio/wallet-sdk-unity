@@ -2,6 +2,32 @@
 
 Compared with the SDK as it stood on `main` before this release.
 
+## 2.0.0-rc.1: public-client SDK (release candidate, not released)
+
+**Nothing in the legacy `Jiwe/` folder or `Samples/` changed.** Existing games keep working without action.
+
+### Added
+
+- A public-client path for new integrations: `JiweSdk.InitializeAsync`, `JiweSdk.Auth` (sign-in with
+  Authorization Code + PKCE, account switching, local sign-out) and `JiweSdk.Rewards`
+  (`GetEarnedXpAsync`). It needs a public client ID only, no API key and no client secret.
+- Verified ID-token handling: RS256 signature against the Hermes JWKS, plus issuer, audience, expiry,
+  `nbf`, nonce and subject checks.
+- A session model with generation tracking, so obsolete callbacks and responses from a previous account are rejected.
+- A Package Manager layout (`package.json`, `Runtime/Core` and `Runtime/Unity` assemblies) and one canonical sample (`Samples/Quickstart`).
+- Documentation: `docs/quickstart.md`, `docs/authentication.md`, `docs/api-reference.md`,
+  `docs/legacy-migration.md`, `docs/sdk-compatibility-matrix.md`, `docs/release-verification.md`.
+
+### Not included
+
+- Cowrie balances (earned or spendable), purchases, reward or airtime writes, game data and user data writes,
+  leaderboards, profile fields, token refresh, and provider logout. See `docs/api-reference.md`.
+- Android, iOS, WebGL and Linux. Windows and macOS standalone are the intended targets and are not yet verified on a device.
+
+### Status
+
+Not verified in the Unity Editor. Core logic passes 75 tests under .NET. See `docs/release-verification.md`.
+
 ## Behaviour changes — read these when upgrading
 
 - **Token exchange now tries `Authorization: Basic` first**, then falls back once to the

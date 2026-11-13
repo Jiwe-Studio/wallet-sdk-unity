@@ -5,7 +5,7 @@ using UnityEngine;
 namespace JiweSamples
 {
     /// <summary>
-    /// STARTER 1 — XP per run + a leaderboard (KentePunk's pattern).
+    /// Legacy compatibility fixture. Use Samples/Quickstart for shipped Unity games.
     /// The visible XP counter works for everyone, logged in or not; only the Jiwe call is gated.
     /// Add this to a GameObject (it adds JiweAuth and JiweWallet), fill in credentials, press Play.
     /// </summary>

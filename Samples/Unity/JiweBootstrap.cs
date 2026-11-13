@@ -78,7 +78,7 @@ namespace JiweSamples
         /// <summary>Wire to your sign-in screen's Cancel button; stays valid for the whole login.</summary>
         public void CancelSignIn() => Auth?.Cancel();
 
-        /// <summary>Awards XP, quietly doing nothing for a guest (who has no token to credit).</summary>
+        /// <summary>Legacy compatibility fixture. Use JiweSdk.Rewards.AwardXpAsync for shipped Unity games.</summary>
         public void AwardXp(int amount, string description, Action<bool> onComplete = null)
         {
             if (!IsConfigured || !IsLoggedIn) { onComplete?.Invoke(false); return; }

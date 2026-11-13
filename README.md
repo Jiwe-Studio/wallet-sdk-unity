@@ -177,14 +177,10 @@ though login succeeds.
    first upload — a wrong Compression Format is the single most common reason a
    build "uploads fine" but shows a blank page.
 
-```csharp
-jiweAuth.OnLoginSuccess += () => {
-    jiweWallet.GiveXpReward(20, "Reward for passing boss#1", result => {
-        if (result.Success) Debug.Log("XP awarded!");
-        else Debug.LogWarning($"XP reward failed: {result.Error}");
-    });
-};
-```
+For a shipped Unity game, use the [public SDK Quickstart](docs/quickstart.md) for XP
+and leaderboard access. The credential-based setup above is legacy. Unity packages
+Resources assets and Inspector values with the game. Keep API keys and client
+secrets out of both.
 
 **Want a working starting point instead?** [`Samples/`](Samples) has seven drop-in starters taken from our
 shipped games — guest-first setup, XP + leaderboard, an update gate, a cosmetic shop, cloud saves, an airtime
@@ -204,7 +200,7 @@ reference but we haven't exercised it ourselves — verify before depending on i
 
 | Method | Login? | Evidence | Notes |
 |---|---|---|---|
-| `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | Live | XP has no monetary value. `transactionId` is only sent if you pass one |
+| `GiveXpReward(xp, description, onComplete, transactionId?)` | Yes | Live | Legacy API-key write. Use the public bearer SDK in Unity builds. |
 | `GiveAirtimeReward(units, phoneNumber, description, onComplete, transactionId?)` | Yes | Live | Min. 5 units; real airtime, asynchronous — see §6 |
 | `PurchaseWithWallet(amount, itemId, description, idempotencyKey, onComplete)` | Yes | Live | Debits the player's own balance. `idempotencyKey` is not optional — §6 |
 | `GetPurchaseStatus(paymentOrderId, onComplete)` | Yes | Docs | Poll a purchase by the `PaymentOrderId` from its result |

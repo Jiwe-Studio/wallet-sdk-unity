@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Runs the engine-free core of the Jiwe SDK (Runtime/Core) under plain .NET.
+    The Unity layer (Runtime/Unity) needs UnityEngine and is verified in the Unity Editor instead.
+    Compile items are listed explicitly so the test build compiles the shipped sources, not copies.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Runtime/Core/*.cs" />
+    <!-- Pure System.Net code; compiled here so the real HttpListener behaviour is exercised. -->
+    <Compile Include="../../Runtime/Unity/JiweLoopbackListener.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>

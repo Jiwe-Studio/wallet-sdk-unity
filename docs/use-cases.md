@@ -65,52 +65,19 @@ Setting the minimum is a manual `POST /metadata/update/game-data` with
 `{"gameData":{"minVersion":"1.8"}}`. KentePunk shows its store page URL next to the
 message so the player can act on it. (README §10–§11.)
 
-### 1.2 Reporting a run's XP
+### 1.2 Awarding XP and reading the board
 
-The visible counter works for everyone; only the Jiwe call is gated. **Adapted.**
-
-```csharp
-public void ReportRun(int score, string mode)
-{
-    sessionXp += score;                                   // counts whether or not the player is logged in
-
-    if (UpdateRequired)      { SetStatus("Update the app to keep syncing XP"); return; }   // checked BEFORE the login gate
-    if (!auth.IsLoggedIn)    { SetStatus("Log in with Jiwe to save this and earn airtime"); return; }
-
-    SetStatus("Syncing to the Jiwe leaderboard…");
-    wallet.GiveXpReward(score, $"Kente Punk {mode} run", r =>
-        SetStatus(r.Success ? "Synced" : $"Couldn't sync right now ({r.Error}). It'll retry next launch."));
-}
-```
-
-An outdated build's own API key can be rejected whether or not the player is logged in,
-which is why the update check comes first.
-
-### 1.3 A leaderboard that also shows each player's level
-
-A leaderboard row can't carry your own fields, and one player can't read another's saved
-data — so KentePunk keeps one key per player in the shared Game Data and joins them
-client-side. **Adapted** (KentePunk reads the map with a regex; this parses it the same way
-you'd parse anything under `gameData`).
+Use the public SDK in shipped Unity games. Once bearer XP is enabled for the
+game, submit the award with the player's session. Save the award GUID with the
+award details and reuse it on retry.
 
 ```csharp
-// write: merges only this player's own key, leaving everyone else's (and minVersion) untouched
-wallet.SetGameData("{\"gameData\":{\"lvl_" + auth.UserInfo.sub + "\":" + level + "}}", r => { });
-
-// read: rows come back in whatever order the server likes — sort and use Score, not xp
-wallet.GetLeaderboard("xp", 20, period: "week", "highest", board => {
-    if (!board.Success) return;
-    var rows = new List<JiweLeaderboardEntry>(board.Entries);
-    rows.Sort((a, b) => b.Score.CompareTo(a.Score));
-    for (int i = 0; i < rows.Count; i++)
-        Show(rank: i + 1, rows[i].name, rows[i].Score, level: levels.TryGetValue(rows[i].id, out var lv) ? lv : 0);
-});
+await JiweSdk.Rewards.AwardXpAsync(score, "Finished level", awardId);
+var board = await JiweSdk.Leaderboard.GetLeaderboardAsync();
 ```
 
-Two live findings baked in: a period board's score arrives as an **uppercase `XP`**
-(reading `xp` gives 0 for every row — `entry.Score` handles it), and the server's rank can
-disagree with its own order, so KentePunk sorts locally and recomputes the rank.
-Remember the level map is **public** and grows with your player count.
+Display each row's rank, nickname and score. The caller placement is available
+even below the displayed rows.
 
 ### 1.4 Airtime milestone: check the pool, then claim
 
@@ -402,22 +369,12 @@ public void BeginSignIn(Action onSuccess, Action<string> onFailure)
 public void CancelSignIn() => _auth?.Cancel();      // wired to the gate's Cancel button — stays live the whole time
 ```
 
-### 3.3 Rewards that quietly do nothing for guests
+### 3.3 Guest play and XP
 
-```csharp
-public void AwardXp(int amount, string description, Action<bool> onComplete = null)
-{
-    if (!IsConfigured || !_auth.IsLoggedIn) { onComplete?.Invoke(false); return; }   // a guest has no token: nothing to credit
-    _wallet.GiveXpReward(amount, description, r => {
-        if (!r.Success) Debug.LogWarning($"XP award failed: {r.Error}");
-        onComplete?.Invoke(r.Success);
-    });
-}
-
-// App-scoped: works logged out, so a guest can still look at the board.
-public void GetLeaderboard(string period, int max, Action<JiweLeaderboardResult> cb)
-    => _wallet.GetLeaderboard("xp", max, period, "highest", cb);
-```
+Guests can keep XP locally. Shipped Unity builds must keep the wallet API key
+out of their assets and Inspector settings. Use the public XP SDK where its
+sign-in platform is supported, or submit verified awards through the game's
+backend. See the [public Quickstart](quickstart.md).
 
 ### 3.4 What the WebGL build taught
 

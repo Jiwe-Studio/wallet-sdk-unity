@@ -1,0 +1,25 @@
+{
+  "name": "com.jiwe.wallet-sdk",
+  "version": "2.0.0-rc.1",
+  "displayName": "Jiwe Wallet SDK",
+  "description": "Jiwe public-client sign-in and player reads for Unity games. Modern path: JiweSdk.InitializeAsync, JiweSdk.Auth and JiweSdk.Rewards. The legacy credential-based API (JiweAuth, JiweWallet) remains available for existing integrations.",
+  "unity": "2022.3",
+  "license": "GPL-3.0-only",
+  "keywords": [
+    "jiwe",
+    "wallet",
+    "oauth",
+    "pkce",
+    "sdk"
+  ],
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "samples": [
+    {
+      "displayName": "Quickstart",
+      "description": "One canonical sample: configure, sign in, read earned XP, switch account, sign out.",
+      "path": "Samples/Quickstart"
+    }
+  ]
+}

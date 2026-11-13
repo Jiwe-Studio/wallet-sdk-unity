@@ -3,9 +3,8 @@ using UnityEngine;
 namespace JiweSamples
 {
     /// <summary>
-    /// Your real Jiwe credentials, kept OUT of scenes and prefabs. Create the asset with
-    /// Assets > Create > Jiwe > Credentials Config, save it at exactly Assets/Resources/JiweCredentials.asset,
-    /// and add that path to .gitignore. See README section 9.
+    /// Legacy compatibility fixture. Keep real API keys and client secrets out of shipped Unity builds.
+    /// Use Samples/Quickstart with a public client ID.
     /// </summary>
     [CreateAssetMenu(menuName = "Jiwe/Credentials Config", fileName = "JiweCredentials")]
     public class JiweCredentialsConfig : ScriptableObject

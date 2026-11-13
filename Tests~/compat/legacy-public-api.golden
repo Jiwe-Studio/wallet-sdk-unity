@@ -1,0 +1,112 @@
+ public DateTime AccessTokenExpiresAtUtc
+ public JiweAuth auth;
+ public JiweLeaderboardEntry[] Entries;
+ public JiweUserInfo UserInfo
+ public PlayerTokenKind playerTokenKind
+ public TokenClientAuth clientAuth
+ public bool CatalogPriceValidated;
+ public bool IsAccessTokenExpired
+ public bool IsLoggedIn
+ public bool IsLoggingIn
+ public bool RequiresApproval;
+ public bool Retryable;
+ public bool Retryable;
+ public bool Success;
+ public bool Success;
+ public bool Success;
+ public bool Success;
+ public bool Success;
+ public bool loginOnStart
+ public class JiweAuth : MonoBehaviour
+ public class JiweLeaderboardEntry
+ public class JiweUserInfo
+ public class JiweWallet : MonoBehaviour
+ public double AvailableAmount;
+ public double CreditsAmount;
+ public double DebitsAmount;
+ public enum PlayerTokenKind
+ public enum TokenClientAuth
+ public event Action OnLoginSuccess;
+ public event Action<string> OnLoginFailed;
+ public float AirtimeEarned;
+ public float Points;
+ public float XP;
+ public float networkTimeoutSeconds
+ public int Amount;
+ public int Available;
+ public int Credits;
+ public int Debits;
+ public int Score
+ public int XP; // the live API's per-period score is UPPERCASE "XP" (JsonUtility is case-sensitive, so without this field every period board read as 0 — confirmed live in KentePunk)
+ public int currentXP; // some entries carry the total under this instead of `xp`
+ public int loopbackPort
+ public int rank;
+ public int xp;
+ public long HttpStatus;
+ public long HttpStatus;
+ public long HttpStatus;
+ public static Action<string> UrlOpener;
+ public string AccessToken
+ public string AirtimeCurrency;
+ public string Currency;
+ public string Description;
+ public string Error;
+ public string Error;
+ public string Error;
+ public string Error;
+ public string Error;
+ public string GameSessionId
+ public string IdToken
+ public string ItemId;
+ public string LedgerTransactionId;
+ public string LedgerTransactionId;
+ public string PaymentOrderId;
+ public string RawResponse;
+ public string RawResponse;
+ public string RawResponse;
+ public string Status;
+ public string Status; // "PENDING" / "POSTED" / "ARCHIVED" / "FAILED" / "REVERSED" — see README §6
+ public string apiKey;
+ public string apiSecret;
+ public string apiUsername;
+ public string authorizationEndpoint
+ public string bio;
+ public string clientId;
+ public string email;
+ public string extraScopes
+ public string id;
+ public string mobileRedirectScheme
+ public string name;
+ public string name;
+ public string nickname;
+ public string phone_number;
+ public string picture;
+ public string sub;
+ public string tokenEndpoint
+ public string userInfoEndpoint
+ public string username;
+ public string walletBaseUrl
+ public string walletId;
+ public string walletResource
+ public string webglRedirectUri
+ public struct JiweLeaderboardResult
+ public struct JiwePurchaseResult
+ public struct JiweRewardsEarnedResult
+ public struct JiweWalletBalanceResult
+ public struct JiweWalletResult
+ public void Cancel()
+ public void CheckCredentialsValid(Action<bool> onResult)
+ public void GetGameData(Action<JiweWalletResult> onComplete)
+ public void GetLeaderboard(string rewardType, int maxEntries, string period, string bestPointsRanking, Action<JiweLeaderboardResult> onComplete)
+ public void GetPurchaseStatus(string paymentOrderId, Action<JiwePurchaseResult> onComplete)
+ public void GetRewardsEarned(Action<JiweRewardsEarnedResult> onComplete)
+ public void GetRewardsEarnedBearer(Action<JiweRewardsEarnedResult> onComplete)
+ public void GetTransactionStatus(string transactionId, Action<JiweWalletResult> onComplete)
+ public void GetUserData(Action<JiweWalletResult> onComplete)
+ public void GetWalletBalance(Action<JiweWalletBalanceResult> onComplete)
+ public void GiveAirtimeReward(int airtimeReward, string recipientNumber, string description, Action<JiweWalletResult> onComplete
+ public void GiveXpReward(int xpEarned, string description, Action<JiweWalletResult> onComplete
+ public void Login()
+ public void PurchaseWithWallet(int amount, string itemId, string description, string idempotencyKey, Action<JiwePurchaseResult> onComplete)
+ public void SetGameData(string jsonPayload, Action<JiweWalletResult> onComplete)
+ public void SetUserData(string jsonPayload, Action<JiweWalletResult> onComplete)

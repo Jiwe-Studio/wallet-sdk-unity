@@ -74,6 +74,7 @@ namespace Jiwe
         // Rewards (credit the logged-in player; require JiweAuth.IdToken)
         // -----------------------------------------------------------------
 
+        /// <summary>Legacy XP award using the application API key. Use the public bearer SDK for shipped Unity builds.</summary>
         /// <param name="transactionId">Optional reference of your own for this reward. Jiwe's RewardBase schema accepts one on every reward type, but its XP examples omit it, so it is only sent when you supply it.</param>
         public void GiveXpReward(int xpEarned, string description, Action<JiweWalletResult> onComplete = null, string transactionId = null)
         {

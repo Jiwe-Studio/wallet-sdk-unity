@@ -22,6 +22,11 @@
       "displayName": "Quickstart",
       "description": "One canonical sample: configure, sign in, read earned XP, switch account, sign out.",
       "path": "Samples~/Quickstart"
+    },
+    {
+      "displayName": "Legacy Unity Examples",
+      "description": "Credential-based examples for existing integrations.",
+      "path": "Samples~/Unity"
     }
   ]
 }

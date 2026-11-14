@@ -1,1 +1,8 @@
-{"name":"JiweSdkTests","references":["Jiwe","JiweSamples","UnityEngine.TestRunner","UnityEditor.TestRunner"],"overrideReferences":true,"precompiledReferences":["nunit.framework.dll"],"autoReferenced":false,"defineConstraints":["UNITY_INCLUDE_TESTS"]}
+{
+  "name": "JiweSdkTests",
+  "references": ["Jiwe", "JiweSamples", "Jiwe.Core", "Jiwe.Runtime", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "Newtonsoft.Json.dll"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

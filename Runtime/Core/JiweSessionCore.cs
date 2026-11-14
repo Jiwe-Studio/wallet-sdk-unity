@@ -51,9 +51,9 @@ public sealed class JiweSessionCore
     /// <summary>Starts an attempt and returns its generation. Previously captured work becomes obsolete.</summary>
     public long BeginSignIn()
     {
-        _generation++;
+        long generation = ++_generation;
         SetStatus(JiweSessionStatus.SigningIn);
-        return _generation;
+        return generation;
     }
 
     public bool IsCurrent(long generation) => generation == _generation;

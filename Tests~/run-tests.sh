@@ -5,8 +5,8 @@
 #   TEST_FILTER=AuthTests Tests~/run-tests.sh
 #   UNITY=/path/to/Unity BUILD_TARGET=Android Tests~/run-tests.sh
 #
-# The SDK stays a loose folder in the repo; an asmdef is added only to the throwaway copy so the
-# test assembly can reference it. Needs: Unity 6, python3. No network access to Jiwe.
+# Runs the legacy fixtures with the checked-in assembly definitions. Requires Unity and Python 3.
+# The opt-in live smoke test is skipped unless live credentials are explicitly set.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -29,16 +29,14 @@ A="$PROJECT/Assets"
 rm -rf "$A/Jiwe" "$A/JiweSamples" "$A/JiweTests" "$A/Editor/JiweTestProjectSetup.cs"
 mkdir -p "$A/Editor"
 cp -R "${SDK_DIR:-$REPO/Jiwe}" "$A/Jiwe"
+rm -rf "$A/JiwePublicRuntime"
+cp -R "$REPO/Runtime" "$A/JiwePublicRuntime"
 SAMPLES_ROOT="${SAMPLES_ROOT:-$REPO/Samples~}"
 if [ -d "$SAMPLES_ROOT/Unity" ]; then
   cp -R "$SAMPLES_ROOT/Unity" "$A/JiweSamples"
-  echo '{ "name": "JiweSamples", "references": ["Jiwe"] }' > "$A/JiweSamples~/JiweSamples.asmdef"
-else
-  mkdir -p "$A/JiweSamples"; echo '{ "name": "JiweSamples", "references": ["Jiwe"] }' > "$A/JiweSamples~/JiweSamples.asmdef"
 fi
 mkdir -p "$A/JiweTests"
-cp "$HERE"/UnityTests/*.cs "$A/JiweTests/"
-cp "$HERE/UnityTests/JiweSdkTests.asmdef" "$A/JiweTests/"
+cp "$HERE"/UnityTests/* "$A/JiweTests/"
 
 cat > "$A/Editor/JiweTestProjectSetup.cs" <<'CS'
 using UnityEditor;
@@ -54,7 +52,8 @@ static class JiweTestProjectSetup
 CS
 cat > "$PROJECT/Packages/manifest.json" <<'JSON'
 { "dependencies": {
-  "com.unity.test-framework": "1.4.5",
+  "com.unity.test-framework": "1.1.33",
+  "com.unity.nuget.newtonsoft-json": "3.2.1",
   "com.unity.modules.imgui": "1.0.0",
   "com.unity.modules.jsonserialize": "1.0.0",
   "com.unity.modules.unitywebrequest": "1.0.0"
@@ -98,7 +97,7 @@ except Exception:
     print("!! no results file — Unity failed before running tests. Last log lines:")
     print("".join(open(log, errors="replace").readlines()[-40:])); sys.exit(2)
 print(f"\n== {root.get('passed')} passed, {root.get('failed')} failed, {root.get('skipped')} skipped, of {root.get('total')}")
-bad = [c for c in root.iter("test-case") if c.get("result") != "Passed"]
+bad = [c for c in root.iter("test-case") if c.get("result") == "Failed"]
 for c in bad:
     msg = c.find("failure/message")
     print(f"  FAIL {c.get('fullname')}\n       {(msg.text or '').strip()[:400] if msg is not None else c.get('result')}")

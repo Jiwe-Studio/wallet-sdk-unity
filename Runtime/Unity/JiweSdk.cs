@@ -21,6 +21,9 @@ public static class JiweSdk
     /// <summary>Reads the signed-in player's game leaderboard.</summary>
     public static readonly JiweLeaderboardApi Leaderboard = new JiweLeaderboardApi();
 
+    /// <summary>Reports and reads lap times on the game's configured performance board.</summary>
+    public static readonly JiweLapApi Laps = new JiweLapApi();
+
     public static bool IsInitialized => JiweRuntime.Config != null;
 
     /// <summary>
@@ -55,9 +58,9 @@ public static class JiweSdk
     /// </summary>
     public static void Shutdown()
     {
+        JiweRuntime.Config = null;
         JiweRuntime.CancelLifetime();
         JiweRuntime.Session.SignOut();
-        JiweRuntime.Config = null;
     }
 }
 

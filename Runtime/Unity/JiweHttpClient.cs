@@ -42,7 +42,8 @@ internal static class JiweHttpClient
         request.SetRequestHeader("Content-Type", "application/json");
         request.SetRequestHeader("Accept", "application/json");
         request.SetRequestHeader("Authorization", "Bearer " + bearerToken);
-        request.SetRequestHeader("Idempotency-Key", idempotencyKey);
+        if (idempotencyKey != null)
+            request.SetRequestHeader("Idempotency-Key", idempotencyKey);
         return SendAsync(request, ct);
     }
 

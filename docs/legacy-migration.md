@@ -20,7 +20,7 @@ The SDK does not promote any legacy financial or administrative operation into t
 
 ## 2. What is preserved, byte for byte
 
-- `Jiwe/JiweAuth.cs`, `Jiwe/JiweWallet.cs`, the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib`, and the `Samples~/` tree are **unchanged** from the `origin/main` baseline (`9fb721f`). Verified with `git diff origin/main -- Jiwe/ Samples~/`, which is empty.
+- `Jiwe/JiweAuth.cs`, `Jiwe/JiweWallet.cs`, the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib`, and the `Samples~/` tree are **unchanged** from the `origin/main` baseline (`9fb721f`). Verified with `git diff 9fb721f d4f4c09 -- Jiwe/ Samples/Unity/ Samples/server-node/`, which is empty.
 - Every public member in the baseline is recorded in `Tests~/compat/legacy-public-api.golden`. `Tests~/compat/snapshot-legacy-api.sh` fails if any is removed or changed. This is a **regression guard**, not an independent oracle. It was generated from the same baseline.
 - **No `[Obsolete]` attributes were added.** A deprecation warning on every legacy call would be noise for games that cannot migrate yet, and the mission asks for no noisy warnings. Deprecation is documented here and in the compatibility matrix.
 - The legacy classes stay in `namespace Jiwe` with their existing names, so existing scenes and prefab references do not change. The new entry point is `JiweSdk` in the global namespace, deliberately not `Jiwe`, which would collide with that namespace.

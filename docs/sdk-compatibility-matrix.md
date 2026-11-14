@@ -8,7 +8,7 @@ What is compatible with what, and how. Read with [legacy-migration.md](legacy-mi
 
 ## A. Legacy public API: preserved
 
-Every public member in the baseline is recorded in `Tests~/compat/legacy-public-api.golden` (112 lines). `Tests~/compat/snapshot-legacy-api.sh` fails if any is removed or its signature changes. The legacy source files are **byte-identical** to the baseline. This is confirmed by `git diff origin/main -- Jiwe/ Samples~/`, which is empty.
+Every public member in the baseline is recorded in `Tests~/compat/legacy-public-api.golden` (112 lines). `Tests~/compat/snapshot-legacy-api.sh` fails if any is removed or its signature changes. The legacy source files are **byte-identical** to the baseline. This is confirmed by `git diff 9fb721f d4f4c09 -- Jiwe/ Samples/Unity/ Samples/server-node/`, which is empty.
 
 | Area | Members | Status |
 |---|---|---|

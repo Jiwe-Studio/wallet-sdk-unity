@@ -29,8 +29,8 @@ namespace JiweSamples
 
         JiweAuth _auth; JiweWallet _wallet;
         bool _pushInProgress;
-        bool _pushPending;
         string _pushSession;
+        string _pendingSession;
 
         void Awake()
         {
@@ -60,7 +60,7 @@ namespace JiweSamples
             if (!_auth.IsLoggedIn) { Status = "Saved on this device. Log in to back it up."; return; }
             if (_pushInProgress)
             {
-                _pushPending = _auth.IdToken == _pushSession;
+                _pendingSession = _auth.IdToken;
                 return;
             }
             _pushInProgress = true;
@@ -75,11 +75,11 @@ namespace JiweSamples
                 _pushInProgress = false;
                 var sameSession = _auth.IdToken == _pushSession;
                 _pushSession = null;
-                var pending = _pushPending;
-                _pushPending = false;
-                if (!sameSession) return;
-                Status = r.Success ? "Backed up to Jiwe." : $"Cloud backup failed ({r.Error}); progress is still saved on this device.";
-                if (pending) PushToCloud();
+                var pendingSession = _pendingSession;
+                _pendingSession = null;
+                if (sameSession)
+                    Status = r.Success ? "Backed up to Jiwe." : $"Cloud backup failed ({r.Error}); progress is still saved on this device.";
+                if (pendingSession != null && pendingSession == _auth.IdToken) PushToCloud();
             });
         }
 

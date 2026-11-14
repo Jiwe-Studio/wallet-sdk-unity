@@ -13,13 +13,15 @@
     "sdk"
   ],
   "dependencies": {
-    "com.unity.nuget.newtonsoft-json": "3.2.1"
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0"
   },
   "samples": [
     {
       "displayName": "Quickstart",
       "description": "One canonical sample: configure, sign in, read earned XP, switch account, sign out.",
-      "path": "Samples/Quickstart"
+      "path": "Samples~/Quickstart"
     }
   ]
 }

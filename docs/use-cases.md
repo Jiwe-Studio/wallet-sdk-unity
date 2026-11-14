@@ -13,7 +13,7 @@ wraps the same endpoints in a client of its own).
 | Uses Jiwe for | XP + leaderboard, airtime milestone, cosmetics, cloud save, update gate | XP, airtime prizes, cowrie purchases, daily pool, leaderboards | Sign-in, XP, leaderboard |
 | Trust model | Client calls Jiwe directly; caps are advisory | Server validates, then calls Jiwe; caps are enforced | Sign-in only when a feature needs it |
 
-**Want to run one?** Each pattern below has a drop-in starter in [`Samples/`](../Samples) — add the component to a
+**Want to run one?** Each pattern below has a drop-in starter in [`Samples~/`](../Samples) — add the component to a
 GameObject and press Play.
 
 **Which should you copy?** If a forged call costs you real money (airtime, cash, a

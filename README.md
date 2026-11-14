@@ -182,10 +182,10 @@ and leaderboard access. The credential-based setup above is legacy. Unity packag
 Resources assets and Inspector values with the game. Keep API keys and client
 secrets out of both.
 
-**Want a working starting point instead?** [`Samples/`](Samples) has seven drop-in starters taken from our
+**Want a working starting point instead?** [`Samples~/`](Samples~) has seven drop-in starters taken from our
 shipped games — guest-first setup, XP + leaderboard, an update gate, a cosmetic shop, cloud saves, an airtime
 milestone, and a server in front of Jiwe. Each is one component that draws its own UI, so add it to a
-GameObject and press Play. See [Samples/README.md](Samples/README.md).
+GameObject and press Play. See [Samples~/README.md](Samples~/README.md).
 
 ---
 
@@ -1005,8 +1005,8 @@ you're on WebGL, see §8 before your first upload.
 
 ## Samples, use cases and tests
 
-**[Samples/](Samples)** — seven runnable starters, one per pattern, each taken from a shipped game. Pick by what a
-forged call would cost you; the table in [Samples/README.md](Samples/README.md) says which to start from.
+**[Samples~/](Samples~)** — seven runnable starters, one per pattern, each taken from a shipped game. Pick by what a
+forged call would cost you; the table in [Samples~/README.md](Samples~/README.md) says which to start from.
 
 **[docs/use-cases.md](docs/use-cases.md)** — the same games as write-ups with the code and the mistakes each one made:
 

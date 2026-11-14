@@ -1,9 +1,7 @@
 {
   "name": "Jiwe.Core",
   "rootNamespace": "",
-  "references": [
-    "Unity.Newtonsoft.Json"
-  ],
+  "references": [],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

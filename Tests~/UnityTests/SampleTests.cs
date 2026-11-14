@@ -326,9 +326,10 @@ namespace Jiwe.Tests
         public IEnumerator Save_RoundTripsToANewDevice()
         {
             yield return LoginOk();
+            Faults("[{\"match\":\"update/user-data\",\"delay\":0.5,\"count\":1}]");
             var s = go.AddComponent<CloudSaveSample>();
             s.LevelUp(); s.LevelUp(); s.LevelUp();
-            yield return WaitFor(() => Requests("/metadata/update/user-data").Count == 3 && s.Status.StartsWith("Backed up"), "backups");
+            yield return WaitFor(() => Requests("/metadata/update/user-data").Count == 2 && s.Status.StartsWith("Backed up"), "backups");
             var last = Requests("/metadata/update/user-data").Last().body;
             StringAssert.Contains("\"userData\"", last); StringAssert.Contains("\"levelUnlocked\":3", last); StringAssert.Contains("\"coins\":30", last);
 

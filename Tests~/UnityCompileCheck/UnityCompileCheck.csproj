@@ -17,7 +17,7 @@
   <ItemGroup>
     <Compile Include="../../Runtime/Core/*.cs" />
     <Compile Include="../../Runtime/Unity/*.cs" />
-    <Compile Include="../../Samples/Quickstart/*.cs" />
+    <Compile Include="../../Samples~/Quickstart/*.cs" />
     <Compile Include="UnityStubs.cs" />
   </ItemGroup>
 

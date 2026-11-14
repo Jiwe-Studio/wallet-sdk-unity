@@ -68,13 +68,16 @@ public sealed class JiweAuthApi
         // A new attempt supersedes any attempt still waiting on the browser.
         CancelAttempt();
         var session = JiweRuntime.Session;
-        long generation = session.BeginSignIn();
         var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, JiweRuntime.LifetimeToken);
         _attempt = attempt;
 
         JiweLoopbackListener listener = null;
+        long generation = session.BeginSignIn();
         try
         {
+            if (!session.IsCurrent(generation))
+                throw Superseded();
+            attempt.Token.ThrowIfCancellationRequested();
             var request = JiweAuthorization.Create(config.ClientId, config.RedirectUri, forceAccountChooser);
 
             // Start listening before the browser opens, so an immediate redirect cannot be missed.
@@ -122,7 +125,8 @@ public sealed class JiweAuthApi
                 tokens.AccessToken,
                 JiweSessionCore.ComputeExpiry(DateTime.UtcNow, tokens.ExpiresInSeconds));
 
-            if (!session.CompleteSignIn(generation, snapshot))
+            attempt.Token.ThrowIfCancellationRequested();
+            if (!session.CompleteSignIn(generation, snapshot) || !session.IsCurrent(generation))
                 throw Superseded();
 
             return new JiwePlayer(identity.Subject);
@@ -168,7 +172,9 @@ public sealed class JiweAuthApi
 
     private void ClearLocalSession()
     {
-        CancelAttempt();
+        var previous = _attempt;
+        _attempt = null;
+        previous?.Cancel();
         JiweRuntime.Session.SignOut();
     }
 }

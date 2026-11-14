@@ -62,6 +62,7 @@ public sealed class JiweRewardsApi
             cancellationToken);
 
         // A result from an earlier account or session must never reach the caller.
+        session.ExpireIfDue(DateTime.UtcNow);
         if (!session.IsCurrent(generation))
         {
             throw new JiweException(JiweErrorKind.SessionChanged, "The signed-in account changed while the request ran.");

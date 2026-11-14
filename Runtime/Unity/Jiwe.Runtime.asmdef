@@ -2,8 +2,7 @@
   "name": "Jiwe.Runtime",
   "rootNamespace": "",
   "references": [
-    "Jiwe.Core",
-    "Unity.Newtonsoft.Json"
+    "Jiwe.Core"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

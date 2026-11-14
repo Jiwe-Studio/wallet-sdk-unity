@@ -28,6 +28,9 @@ namespace JiweSamples
         [Serializable] class WriteEnvelope { public SaveData userData; }
 
         JiweAuth _auth; JiweWallet _wallet;
+        bool _pushInProgress;
+        string _pushSession;
+        string _pendingSession;
 
         void Awake()
         {
@@ -55,12 +58,29 @@ namespace JiweSamples
         public void PushToCloud()
         {
             if (!_auth.IsLoggedIn) { Status = "Saved on this device. Log in to back it up."; return; }
+            if (_pushInProgress)
+            {
+                _pendingSession = _auth.IdToken;
+                return;
+            }
+            _pushInProgress = true;
+            _pushSession = _auth.IdToken;
+            Status = "Backing up to Jiwe…";
             Local._version++;
             SaveLocal();
             // Send every field you own, every time — even though Jiwe merges, it means a forgotten field can't be lost.
             string body = JsonUtility.ToJson(new WriteEnvelope { userData = Local });
             _wallet.SetUserData(body, r =>
-                Status = r.Success ? "Backed up to Jiwe." : $"Cloud backup failed ({r.Error}); progress is still saved on this device.");
+            {
+                _pushInProgress = false;
+                var sameSession = _auth.IdToken == _pushSession;
+                _pushSession = null;
+                var pendingSession = _pendingSession;
+                _pendingSession = null;
+                if (sameSession)
+                    Status = r.Success ? "Backed up to Jiwe." : $"Cloud backup failed ({r.Error}); progress is still saved on this device.";
+                if (pendingSession != null && pendingSession == _auth.IdToken) PushToCloud();
+            });
         }
 
         public void PullFromCloud()

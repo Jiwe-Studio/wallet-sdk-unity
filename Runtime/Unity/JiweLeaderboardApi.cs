@@ -73,6 +73,7 @@ internal static class JiweXpRequest
         var snapshot = session.RequireUsable(DateTime.UtcNow);
         var response = await send(snapshot.AccessToken);
 
+        session.ExpireIfDue(DateTime.UtcNow);
         if (!session.IsCurrent(generation))
             throw new JiweException(JiweErrorKind.SessionChanged, "The signed-in account changed while the request ran.");
 

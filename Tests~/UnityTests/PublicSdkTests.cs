@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
@@ -23,23 +24,23 @@ namespace Jiwe.Tests
         {
             var xp = decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture);
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Rewards.AwardXpAsync(xp, "fixture", Guid.NewGuid())).Kind);
+                ThrowsJiwe(() => JiweSdk.Rewards.AwardXpAsync(xp, "fixture", Guid.NewGuid())).Kind);
         }
 
         [Test]
         public void RejectsMissingAwardIdAndDescription()
         {
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Rewards.AwardXpAsync(1, "fixture", Guid.Empty)).Kind);
+                ThrowsJiwe(() => JiweSdk.Rewards.AwardXpAsync(1, "fixture", Guid.Empty)).Kind);
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Rewards.AwardXpAsync(1, null, Guid.NewGuid())).Kind);
+                ThrowsJiwe(() => JiweSdk.Rewards.AwardXpAsync(1, null, Guid.NewGuid())).Kind);
         }
 
         [Test]
         public void RejectsCancelledSignInBeforeOpeningBrowser()
         {
             Assert.AreEqual(JiweErrorKind.LoginCancelled,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Auth.SignInAsync(new CancellationToken(true))).Kind);
+                ThrowsJiwe(() => JiweSdk.Auth.SignInAsync(new CancellationToken(true))).Kind);
             Assert.AreEqual(JiweSessionStatus.SignedOut, JiweSdk.Auth.Status);
         }
 
@@ -57,10 +58,10 @@ namespace Jiwe.Tests
             {
                 var attempt = JiweSdk.Auth.SignInAsync();
                 Assert.IsTrue(attempt.IsCompleted, "A superseded attempt must exit before waiting for a browser.");
-                Assert.AreEqual(JiweErrorKind.LoginSuperseded, Assert.ThrowsAsync<JiweException>(() => attempt).Kind);
+                Assert.AreEqual(JiweErrorKind.LoginSuperseded, ThrowsJiwe(() => attempt).Kind);
                 Assert.IsNull(JiweSdk.Auth.PlayerId);
                 Assert.AreEqual(JiweErrorKind.NotSignedIn,
-                    Assert.ThrowsAsync<JiweException>(() => JiweSdk.Rewards.GetEarnedXpAsync()).Kind);
+                    ThrowsJiwe(() => JiweSdk.Rewards.GetEarnedXpAsync()).Kind);
             }
             finally
             {
@@ -72,15 +73,15 @@ namespace Jiwe.Tests
         public void LapRoutesValidateInputsAndRequireSignIn()
         {
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Laps.SubmitAsync(0, Guid.NewGuid())).Kind);
+                ThrowsJiwe(() => JiweSdk.Laps.SubmitAsync(0, Guid.NewGuid())).Kind);
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Laps.SubmitAsync(1000, Guid.Empty)).Kind);
+                ThrowsJiwe(() => JiweSdk.Laps.SubmitAsync(1000, Guid.Empty)).Kind);
             Assert.AreEqual(JiweErrorKind.InvalidRequest,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Laps.QueryAsync(101)).Kind);
+                ThrowsJiwe(() => JiweSdk.Laps.QueryAsync(101)).Kind);
             Assert.AreEqual(JiweErrorKind.NotSignedIn,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Laps.SubmitAsync(1000, Guid.NewGuid())).Kind);
+                ThrowsJiwe(() => JiweSdk.Laps.SubmitAsync(1000, Guid.NewGuid())).Kind);
             Assert.AreEqual(JiweErrorKind.NotSignedIn,
-                Assert.ThrowsAsync<JiweException>(() => JiweSdk.Laps.QueryAsync()).Kind);
+                ThrowsJiwe(() => JiweSdk.Laps.QueryAsync()).Kind);
         }
 
         [Test]
@@ -103,6 +104,12 @@ namespace Jiwe.Tests
             var response = JObject.Parse("{\"bestMilliseconds\":" + value + "}");
             Assert.AreEqual(JiweErrorKind.UnexpectedResponse,
                 Assert.Throws<JiweException>(() => JiweLapApi.ParseBest(response)).Kind);
+        }
+        private static JiweException ThrowsJiwe(Func<Task> action)
+        {
+            var task = action();
+            Assert.IsTrue(task.IsCompleted, "Validation must finish before any asynchronous I/O.");
+            return Assert.Throws<JiweException>(() => task.GetAwaiter().GetResult());
         }
     }
 }

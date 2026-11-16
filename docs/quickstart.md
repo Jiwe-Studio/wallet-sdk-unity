@@ -24,11 +24,13 @@ This guide gets a Unity game to sign a player in with Jiwe and read their earned
 https://github.com/Jiwe-Studio/wallet-sdk-unity.git#v2.0.0-rc.1
 ```
 
-> **Note:** The `v2.0.0-rc.1` tag is not created yet. Until it exists, use the release-candidate branch: `https://github.com/Jiwe-Studio/wallet-sdk-unity.git#feature/unity-public-client-sdk`. Do not use `main`; it does not contain the new SDK.
+> **Note:** The `v2.0.0-rc.1` tag is not created yet. Until it exists, use the release-candidate branch: `https://github.com/Jiwe-Studio/wallet-sdk-unity.git#release/unity-bearer-xp`. Do not use `main`; it does not contain the new SDK.
+>
+> A Git install compiles three assemblies: `Jiwe.Core`, `Jiwe.Runtime` (the modern `JiweSdk` API) and `Jiwe.Legacy` (`Jiwe.JiweAuth`, `Jiwe.JiweWallet`). If the Console shows *"has no meta file, but it's in an immutable folder"* or no `Jiwe.*` assemblies appear, the branch you installed predates the packaging fix; pin a commit that ships `.meta` files.
 
 The package installs its one dependency, **Newtonsoft Json**, automatically. If Unity reports a missing `Newtonsoft` namespace, add `com.unity.nuget.newtonsoft-json` from the Package Manager's Unity Registry.
 
-**Legacy SDK users:** the old `Jiwe/` folder still works. Do not install both copies. See [legacy-migration.md](legacy-migration.md).
+**Legacy SDK users:** the old `Jiwe/` folder still works, and the package now ships it too. Do not install both copies: delete `Assets/Jiwe/` (including `Plugins/WebGL/JiweStorage.jslib`) before adding the package, or the project holds two copies of `Jiwe.JiweAuth`, `Jiwe.JiweWallet` and the WebGL plugin. See [legacy-migration.md](legacy-migration.md).
 
 ---
 

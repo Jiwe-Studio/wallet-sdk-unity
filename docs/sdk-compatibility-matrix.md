@@ -73,11 +73,13 @@ The legacy DTOs are serialised with `JsonUtility`, which is case-sensitive. Fiel
 
 ## F. Samples
 
+Samples live in `Samples~/` (renamed from `Samples/` after `d4f4c09`), so Unity does not compile them inside the installed package. Only **Quickstart** is registered in `package.json` and importable from the Package Manager. The legacy samples are copied by hand, as before.
+
 | Sample | Status |
 |---|---|
-| `Samples/Unity/*` (legacy samples) | **Code unchanged** (doc comments only). Still use the key-based API. Compiled and exercised by the legacy suite in Unity 2022.3.30f1 |
-| `Samples/server-node/*` (legacy server sample) | **Unchanged.** Known defects remain; see the release verification document |
-| `Samples/Quickstart/QuickstartSample.cs` (new canonical sample) | New. Public API only. **Compiles in Unity 2022.3.30f1** against a Git-installed package (2026-11-16). Not run in the Editor |
+| `Samples~/Unity/*` (legacy samples) | **Code unchanged** (doc comments only). Still use the key-based API. Compiled and exercised by the legacy suite in Unity 2022.3.30f1 |
+| `Samples~/server-node/*` (legacy server sample) | **Unchanged.** Known defects remain; see the release verification document |
+| `Samples~/Quickstart/QuickstartSample.cs` (new canonical sample) | New. Public API only. **Compiles in Unity 2022.3.30f1** against a Git-installed package (2026-11-16). Not run in the Editor |
 
 ## G. Unity Editor and install method
 

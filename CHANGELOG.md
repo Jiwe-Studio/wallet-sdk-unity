@@ -14,7 +14,7 @@ Compared with the SDK as it stood on `main` before this release.
 - Verified ID-token handling: RS256 signature against the Hermes JWKS, plus issuer, audience, expiry,
   `nbf`, nonce and subject checks.
 - A session model with generation tracking, so obsolete callbacks and responses from a previous account are rejected.
-- A Package Manager layout (`package.json`, `Runtime/Core` and `Runtime/Unity` assemblies) and one canonical sample (`Samples/Quickstart`).
+- A Package Manager layout (`package.json`, `Runtime/Core` and `Runtime/Unity` assemblies) and one canonical sample (`Samples~/Quickstart`). All samples moved from `Samples/` to `Samples~/`, so the package no longer logs "will not be compiled" warnings for them; legacy users copy `Samples~/Unity/` instead of `Samples/Unity/`.
 - Documentation: `docs/quickstart.md`, `docs/authentication.md`, `docs/api-reference.md`,
   `docs/legacy-migration.md`, `docs/sdk-compatibility-matrix.md`, `docs/release-verification.md`.
 

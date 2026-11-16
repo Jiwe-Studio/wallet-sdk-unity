@@ -21,7 +21,7 @@ mistakes each game made, are in [docs/use-cases.md](../docs/use-cases.md).
 
 ## Using one
 
-1. **Copy** the SDK's `Jiwe/` folder (including `Plugins/`) and `Samples/Unity/` into your project's `Assets/`.
+1. **Copy** the SDK's `Jiwe/` folder (including `Plugins/`) and `Samples~/Unity/` into your project's `Assets/`. (The `~` keeps Unity from compiling these inside the package; the copies in `Assets/` compile normally.)
 2. **Register your app** with Jiwe *before* you create it — the redirect URI and scopes matter (main README §3).
    Standalone/Editor: set `JiweAuth.loopbackPort` to a fixed port and register `http://127.0.0.1:<port>/`.
 3. **Credentials:** Assets ▸ Create ▸ Jiwe ▸ Credentials Config, save it as
@@ -37,7 +37,7 @@ If login fails at the token step, see "How the client secret is presented" in th
 ## The server sample
 
 ```bash
-cd Samples/server-node
+cd Samples~/server-node
 JIWE_API_USERNAME=... JIWE_API_KEY=... node server.mjs
 ```
 

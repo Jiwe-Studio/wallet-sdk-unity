@@ -5,8 +5,8 @@
 #   TEST_FILTER=AuthTests Tests~/run-tests.sh
 #   UNITY=/path/to/Unity BUILD_TARGET=Android Tests~/run-tests.sh
 #
-# The SDK stays a loose folder in the repo; an asmdef is added only to the throwaway copy so the
-# test assembly can reference it. Needs: Unity 6, python3. No network access to Jiwe.
+# The legacy SDK folder is copied with its shipped asmdef (Jiwe.Legacy) so the test assembly can
+# reference it. Needs: Unity 6, python3. No network access to Jiwe.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -29,20 +29,21 @@ A="$PROJECT/Assets"
 rm -rf "$A/Jiwe" "$A/JiweSamples" "$A/JiweTests" "$A/Editor/JiweTestProjectSetup.cs"
 mkdir -p "$A/Editor"
 cp -R "${SDK_DIR:-$REPO/Jiwe}" "$A/Jiwe"
-echo '{ "name": "Jiwe", "rootNamespace": "Jiwe" }' > "$A/Jiwe/Jiwe.asmdef"
+# The package ships Jiwe/Jiwe.Legacy.asmdef; tests compile against that. Older SDK_DIR copies without one get it added.
+ls "$A/Jiwe"/*.asmdef >/dev/null 2>&1 || echo '{ "name": "Jiwe.Legacy", "rootNamespace": "Jiwe" }' > "$A/Jiwe/Jiwe.Legacy.asmdef"
 SAMPLES_ROOT="${SAMPLES_ROOT:-$REPO/Samples}"
 if [ -d "$SAMPLES_ROOT/Unity" ]; then
   cp -R "$SAMPLES_ROOT/Unity" "$A/JiweSamples"
-  echo '{ "name": "JiweSamples", "references": ["Jiwe"] }' > "$A/JiweSamples/JiweSamples.asmdef"
+  echo '{ "name": "JiweSamples", "references": ["Jiwe.Legacy"] }' > "$A/JiweSamples/JiweSamples.asmdef"
 else
-  mkdir -p "$A/JiweSamples"; echo '{ "name": "JiweSamples", "references": ["Jiwe"] }' > "$A/JiweSamples/JiweSamples.asmdef"
+  mkdir -p "$A/JiweSamples"; echo '{ "name": "JiweSamples", "references": ["Jiwe.Legacy"] }' > "$A/JiweSamples/JiweSamples.asmdef"
 fi
 mkdir -p "$A/JiweTests"
 cp "$HERE"/UnityTests/*.cs "$A/JiweTests/"
 cat > "$A/JiweTests/JiweSdkTests.asmdef" <<'JSON'
 {
   "name": "JiweSdkTests",
-  "references": ["Jiwe", "JiweSamples", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "references": ["Jiwe.Legacy", "JiweSamples", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
   "includePlatforms": [], "excludePlatforms": [],
   "overrideReferences": true, "precompiledReferences": ["nunit.framework.dll"],
   "autoReferenced": false, "defineConstraints": ["UNITY_INCLUDE_TESTS"]

@@ -19,9 +19,9 @@ Useful switches: `TEST_FILTER=Jiwe.Tests.AuthTests`, `UNITY=/path/to/Unity`, `BU
 
 ## How it's wired
 
-The SDK stays a loose folder in this repo. The runner copies it, the samples and the tests into a **throwaway Unity
-project** and adds `.asmdef` files there only, so the test assembly can reference the SDK without changing how you
-consume it. Tests point the SDK at the mock through the same overrides a developer would use for a non-production
+The runner copies the legacy SDK (`Jiwe/`, with its shipped `Jiwe.Legacy.asmdef`), the samples and the tests into a
+**throwaway Unity project** and adds `.asmdef` files for the samples and tests there only, so the test assembly can
+reference the SDK the same way a package install does. Tests point the SDK at the mock through the same overrides a developer would use for a non-production
 environment (`walletBaseUrl`, `tokenEndpoint`, …), and capture the login URL through `JiweAuth.UrlOpener`.
 
 ## Are the tests any good?

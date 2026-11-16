@@ -2,7 +2,7 @@
 
 This document covers the existing credential-based SDK (`Jiwe/JiweAuth.cs`, `Jiwe/JiweWallet.cs` and the WebGL plugin `Jiwe/Plugins/WebGL/JiweStorage.jslib`) and the path away from it.
 
-**Summary.** The legacy SDK keeps working. Nothing in the `Jiwe/` folder was changed in this release, so existing games compile and behave exactly as before. New integrations should use the public-client API in `Runtime/`. Some legacy operations have **no safe direct-client replacement** and must move to a trusted game server; see section 3.
+**Summary.** The legacy SDK keeps working. No executable code in the `Jiwe/` folder was changed in this release, so existing games that **copy the folder into `Assets/`** compile and behave as before. Installed as a UPM package, the legacy API compiles only from a commit that ships `Jiwe/Jiwe.Legacy.asmdef` and `.meta` files (section 2). New integrations should use the public-client API in `Runtime/`. Some legacy operations have **no safe direct-client replacement** and must move to a trusted game server; see section 3.
 
 ---
 
@@ -18,18 +18,31 @@ Preserving an old credential format is not the same as preserving the authority 
 
 The SDK does not promote any legacy financial or administrative operation into the new beginner-facing API. Preserving a call does not endorse it.
 
-## 2. What is preserved, byte for byte
+## 2. What is preserved
 
-- `Jiwe/JiweAuth.cs`, `Jiwe/JiweWallet.cs`, the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib`, and the `Samples/` tree are **unchanged** from the `origin/main` baseline (`9fb721f`). Verified with `git diff origin/main -- Jiwe/ Samples/`, which is empty.
+- **Code against the `origin/main` baseline (`9fb721f`):** `Jiwe/JiweAuth.cs` and the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib` are byte-identical. `Jiwe/JiweWallet.cs` differs by one added doc comment. The legacy samples `Samples/Unity/JiweBootstrap.cs`, `JiweCredentialsConfig.cs` and `XpAndLeaderboardSample.cs` differ only in doc comments. No executable line changed. Checked with `git diff origin/main -- 'Jiwe/*.cs' 'Jiwe/*.jslib' 'Samples/*'`.
+- **Packaging additions, not code changes:** `Jiwe/Jiwe.Legacy.asmdef` and `.meta` files for every shipped file.
+
+### "Keeps working" depends on how the SDK is installed
+
+| Install | Legacy `JiweAuth` / `JiweWallet` |
+|---|---|
+| Copy `Jiwe/` into `Assets/` (the historical method) | Compiles into `Assembly-CSharp`, as before |
+| UPM Git URL, `release/unity-bearer-xp` at `d4f4c09` or earlier | **Compiles into nothing.** There is no asmdef, so Unity does not compile the scripts, and without `.meta` files Unity ignores every asset in the package. Found by the 2026-11-14 verification in Unity 2022.3.30f1 |
+| UPM Git URL from a commit with `Jiwe.Legacy.asmdef` and `.meta` files | Compiles into the `Jiwe.Legacy` assembly, which is auto-referenced, so game scripts need no change. Verified in Unity 2022.3.30f1, 2026-11-16 |
+
+Use one install method, not both. A project with `Assets/Jiwe/` and the package would hold two copies of the same types and the WebGL plugin.
 - Every public member in the baseline is recorded in `Tests~/compat/legacy-public-api.golden`. `Tests~/compat/snapshot-legacy-api.sh` fails if any is removed or changed. This is a **regression guard**, not an independent oracle. It was generated from the same baseline.
 - **No `[Obsolete]` attributes were added.** A deprecation warning on every legacy call would be noise for games that cannot migrate yet, and the mission asks for no noisy warnings. Deprecation is documented here and in the compatibility matrix.
 - The legacy classes stay in `namespace Jiwe` with their existing names, so existing scenes and prefab references do not change. The new entry point is `JiweSdk` in the global namespace, deliberately not `Jiwe`, which would collide with that namespace.
 
-**Not verified:** that a real legacy game still compiles and runs after this release. That needs a Unity Editor run of the legacy `Tests~/UnityTests` suite, which has not been done. See [release-verification.md](release-verification.md).
+**Verified in the Editor:** the legacy `Tests~/UnityTests` suite passes on Unity 2022.3.30f1 (macOS, PlayMode, against the mock server): **101 passed, 0 failed, 1 skipped**. The skip is the live smoke test, which needs API credentials. It passed on 2026-11-14 from a copy in `Assets/`, and again on 2026-11-16 against the shipped `Jiwe.Legacy.asmdef`. See [release-verification.md](release-verification.md#71-g1-and-g2-evidence-2026-11-16-branch-fixupm-meta-files).
+
+**Not verified:** a real shipped legacy game, Unity 6, Windows, or any player build.
 
 ### Coexistence
 
-New and legacy code can live in one project. The new `Jiwe` class, the `Jiwe.Runtime` assembly and the legacy `JiweAuth` / `JiweWallet` components do not share state. They use different default redirect ports (legacy: dynamic; new: `51772`). Running a legacy sign-in and a new sign-in at the same moment is **unverified**.
+New and legacy code can live in one project. The new `JiweSdk` class, the `Jiwe.Runtime` assembly and the legacy `JiweAuth` / `JiweWallet` components do not share state. They use different default redirect ports (legacy: dynamic; new: `51772`). Running a legacy sign-in and a new sign-in at the same moment is **unverified**.
 
 ## 3. Operations with no safe direct-client replacement
 
@@ -47,6 +60,8 @@ These legacy operations must not be called from a shipped Unity build for new wo
 | `JiweWallet.CheckCredentialsValid` | Returns `true` during outages and 404s, so it cannot prove credentials are valid | Use the new session API, or a release policy endpoint |
 | `JiweWallet.GetGameData` | Requires the app key in the build | A scoped bearer read, planned but not in this release |
 
+These rows describe the legacy **key-based** calls. Game-reported XP and the XP leaderboard now also have bearer replacements in the new SDK (next table). The key-based calls still should not ship.
+
 ### Operations that are not yet in the new SDK but have a planned path
 
 | Legacy operation | Planned path | Status |
@@ -54,6 +69,9 @@ These legacy operations must not be called from a shipped Unity build for new wo
 | `GetUserData` | Bearer read with `user-data:read` | Permitted for public clients; not implemented in this release |
 | `GetGameData` | Bearer read with `game-data:read` | Permitted for public clients; not implemented in this release |
 | `GetRewardsEarned`, `GetRewardsEarnedBearer` | `JiweSdk.Rewards.GetEarnedXpAsync()` | **Implemented** |
+| `GiveXpReward` (game-reported XP) | `JiweSdk.Rewards.AwardXpAsync()` (bearer, idempotent by award GUID) | **Implemented.** Verified live on 2026-11-14 |
+| `GetLeaderboard` (XP) | `JiweSdk.Leaderboard.GetLeaderboardAsync()` | **Implemented**, with a known server-side issue: awarded players can be missing. See [api-reference.md](api-reference.md#known-server-side-issue-awarded-players-missing-from-the-leaderboard) |
+| Score (performance) leaderboards, such as lap times | Needs **a trusted game server** or **an ID-token accessor in the SDK**. The Abacus route takes the player's ID token as `X-API-TOKEN` alongside an API key, and the SDK discards the ID token after sign-in | **Not available.** See [authentication.md](authentication.md#known-gap-no-id-token-for-api-key-routes) |
 | `Login` (legacy PKCE with `apiSecret`) | `JiweSdk.Auth.SignInAsync()` | **Implemented** |
 
 ## 4. Credential exposure: immediate assessment

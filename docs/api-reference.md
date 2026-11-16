@@ -15,7 +15,8 @@ public static class JiweSdk
 | Member | Type | Description |
 |---|---|---|
 | `Auth` | `JiweAuthApi` | Sign-in, account switching, sign-out, session state |
-| `Rewards` | `JiweRewardsApi` | Reads of earned totals for the signed-in player |
+| `Rewards` | `JiweRewardsApi` | Earned-XP reads and XP awards for the signed-in player |
+| `Leaderboard` | `JiweLeaderboardApi` | The game's XP leaderboard, with the caller's placement |
 | `IsInitialized` | `bool` | True after a successful `InitializeAsync` and before `Shutdown` |
 | `InitializeAsync(JiweConfig)` | `Task` | Validates and stores the configuration. Calling it again ends any session first |
 | `Shutdown()` | `void` | Cancels waiting sign-ins, clears the session, and stops accepting results from earlier work. Does not contact Jiwe |
@@ -148,7 +149,7 @@ These are deliberately absent. Each has a precise blocker in [release-verificati
 - **Spendable balance of any kind.** Earned totals are not balances.
 - **Purchases, rewards issuance, airtime, payouts, refunds.** These are financial or administrative and belong on a trusted server.
 - **Game data and user data.** Permitted for public clients but not implemented here.
-- **Leaderboards.**
+- **Score (performance) leaderboards**, such as lap times. See [authentication.md](authentication.md#known-gap-no-id-token-for-api-key-routes).
 - **Profile fields** (name, picture, email, phone).
 - **Token refresh**, and **provider-side logout or revocation**.
 - **Android, iOS, WebGL and Linux.**
@@ -159,7 +160,44 @@ These are deliberately absent. Each has a precise blocker in [release-verificati
 
 `JiweSessionCore`, `JiweAuthorization`, `JiwePkce`, `JiweTokenResponse`, `JiweJwks`, `JiweIdTokenValidator`, `JiweRewardsParser`, `JiweHttpStatus` and `JiweSessionSnapshot` are compiled as part of `Jiwe.Core`. They are `public` only because `Jiwe.Runtime` is a separate assembly and must reach them. **They are not part of the supported API.** Do not depend on them; they may change without notice.
 
-## Leaderboard and XP awards
+## XP awards: `JiweSdk.Rewards.AwardXpAsync`
 
-- `JiweSdk.Leaderboard.GetLeaderboardAsync(limit, cancellationToken)` returns the eligible count, ranked rows, and optional caller placement. The default limit is 10 and the maximum is 100.
-- `JiweSdk.Rewards.AwardXpAsync(xpEarned, description, awardId, gameSessionId, cancellationToken)` returns the ledger transaction ID. Bearer writes must be enabled for the game. Reuse the award GUID and details when retrying.
+```csharp
+Task<string> AwardXpAsync(decimal xpEarned, string description, Guid awardId,
+                          string gameSessionId = null, CancellationToken cancellationToken = default)
+```
+
+Posts to `/oidc/rewards/xp` and returns the ledger transaction ID. `xpEarned` must be positive with at most two decimal places, and `awardId` must not be `Guid.Empty`; otherwise it throws `InvalidRequest` without contacting Jiwe. Bearer writes must be enabled for the game.
+
+**Retry with the same `awardId` and the same details.** The award ID is the idempotency key.
+
+**Verified live (2026-11-14, Unity 2022.3.30f1, production, one test player):** an award of 1 XP raised `GetEarnedXpAsync` from 89.5 to 90.5. A retry with the same GUID and details returned the **same** `ledger_transaction_id`, and earned XP stayed at 90.5.
+
+The success response has `"type": "SUCCESS"`. The SDK throws `UnexpectedResponse` for any other value, or if `ledger_transaction_id` is not a GUID. Note that the leaderboard response uses `"type": "OK"` instead (below), so do not share response-checking code between the two.
+
+---
+
+## Leaderboard: `JiweSdk.Leaderboard.GetLeaderboardAsync`
+
+`GetLeaderboardAsync(limit, cancellationToken)` reads `/oidc/leaderboard` and returns a `JiweLeaderboard`. The default limit is 10 and the maximum is 100.
+
+| `JiweLeaderboard` member | Type | Description |
+|---|---|---|
+| `TotalEntries` | `int` | Number of eligible players |
+| `Entries` | `IReadOnlyList<JiweLeaderboardEntry>` | Ranked rows: `Rank`, `Score` (`decimal`), `DisplayName`, `IsCaller` |
+| `Caller` | `JiweLeaderboardPlacement` | The signed-in player's `Rank` and `Score`, or `null` when unranked |
+
+The SDK requires `"type": "OK"` and `"period": "all"` and throws `UnexpectedResponse` otherwise.
+
+### Known server-side issue: awarded players missing from the leaderboard
+
+Observed live on 2026-11-14: a test player with **90.5** earned XP (from `GetEarnedXpAsync`) was **not** on the leaderboard. `Caller` was `null` and `TotalEntries` stayed at 2. This held for reads straight after the award and for a read **more than 6 minutes** later, so it is not propagation lag. The response parsed correctly; the exclusion comes from Abacus and is not yet explained.
+
+Until Jiwe resolves it:
+
+- Treat **`GetEarnedXpAsync` as the source of truth** for a player's own XP. Do not derive it from the leaderboard.
+- Treat `Caller == null` as "not shown", not as "has no XP".
+
+### Scores can be inexact
+
+Scores are summed on the server in binary floating point. A live read returned `233.19999999999985`. The SDK parses it as `decimal` but cannot recover the exactness the server lost. **Round for display**, for example `score.ToString("0.##")`, and do not compare scores for equality.

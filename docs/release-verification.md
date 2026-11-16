@@ -29,7 +29,7 @@ Environment: macOS (darwin 27.2), Homebrew .NET SDK 11.0.100 (runtime 11.0.0), N
 | `dotnet run --project "Tests~/CoreTests"` | **75 passed, 0 failed.** Covers PKCE (RFC 7636 vector), config and redirect validation, authorize and token request shape, callback validation, token parsing, ID-token RS256 verification (valid, tampered, `alg none`, HS256 downgrade, unknown kid, wrong issuer, audience, `azp`, expiry, `nbf`, nonce, subject, oversize), live-shaped JWKS, XP parsing (missing field, string, negative, extra fields), HTTP status mapping, session generation and account-switch rules, and four real-`HttpListener` loopback tests (delivery and 404, timeout frees the port, cancellation frees the port, busy port) |
 | `dotnet build "Tests~/UnityCompileCheck"` | **Build succeeded**, against UnityEngine **stubs**. Shows the Unity layer and the sample compile against the members they call. This is **not** an Editor compile |
 | `Tests~/compat/snapshot-legacy-api.sh` | **All 112 golden members present.** This is a regression guard generated from the same baseline, not an independent oracle |
-| `git diff origin/main -- Jiwe/ Samples/` | **Empty.** Legacy code unchanged |
+| `git diff origin/main -- Jiwe/ Samples/` | Empty at the time of this record. Since `d4f4c09`, doc comments only, plus packaging files (asmdef, `.meta`) from `fix/upm-meta-files`. No executable legacy line changed |
 | `curl https://id.jiwe.io/.well-known/openid-configuration` (anonymous) | HTTP 200. S256 supported; `token_endpoint_auth_methods_supported` includes `none`; `refresh_token`, `end_session_endpoint` and `revocation_endpoint` advertised |
 | `curl https://id.jiwe.io/jwks` (anonymous) | HTTP 200. One RSA key, `use: sig`, no `alg` field, 2048-bit modulus. The SDK's parser accepts this shape (regression test added) |
 | `curl https://abacus.jiwe.io/rest/api/v1/oidc/rewards/earned` (anonymous) | HTTP 401 `"A Bearer access token is required"`. Consistent with the bearer contract |
@@ -61,7 +61,7 @@ The mission asks for coverage of the new path and the legacy path. This table sh
 | Unity object lifecycle | **Not covered by any runnable test.** `JiweSdk.Shutdown` and the sample's `OnDestroy` are reviewed but not exercised |
 | Legacy configuration loads | **Not run** (needs the Unity Editor) |
 | Legacy public methods callable | **Not run** (needs the Unity Editor). The API snapshot shows the signatures are present |
-| Legacy headers unchanged | Verified by source identity (`git diff` is empty) |
+| Legacy headers unchanged | Verified by source identity: no executable legacy line differs from `origin/main` |
 | Modern and legacy coexist | **Not run** |
 
 ## 4. Contract verification
@@ -111,8 +111,8 @@ An independent subagent reviewed the code and documents with instructions to bre
 
 | # | Gate | Owner | Blocks |
 |---|---|---|---|
-| G1 | **Unity Editor import and compile** of `package.json`, both asmdefs, the legacy `Jiwe/` folder and the sample. Required before any packaging claim | SDK release owner | Limited pilot, public release |
-| G2 | **Legacy Unity test suite** (`Tests~/UnityTests`) run in the Editor, showing the legacy path still works | SDK release owner | Limited pilot, public release |
+| G1 | **Unity Editor import and compile** of `package.json`, both asmdefs, the legacy `Jiwe/` folder and the sample. Required before any packaging claim. **Closed for Unity 2022.3.30f1 on macOS, 2026-11-16** (section 7.1) | SDK release owner | Limited pilot, public release |
+| G2 | **Legacy Unity test suite** (`Tests~/UnityTests`) run in the Editor, showing the legacy path still works. **Closed for Unity 2022.3.30f1 PlayMode on macOS, 2026-11-16: 101 passed, 1 skipped** (section 7.1) | SDK release owner | Limited pilot, public release |
 | G3 | **Provisioned public client** from Jiwe, with exactly the four scopes and the exact redirect URI | Jiwe Developer Relations | Any live run |
 | G4 | **Authenticated sign-in and XP read** with a test player on the provisioned client | SDK owner with G3 | Limited pilot |
 | G5 | **Platform verification** of the browser redirect on Windows and macOS, including cancellation, a busy port, and a retry | SDK owner | Limited pilot |
@@ -122,9 +122,29 @@ An independent subagent reviewed the code and documents with instructions to bre
 | G9 | **Sample run in the Editor**, reading XP, switching account and signing out | SDK owner | Limited pilot |
 | G10 | **Independent developer onboarding test:** someone who has not seen the code follows the Quickstart start to finish | SDK release owner | Public release |
 
+### 7.1 G1 and G2 evidence (2026-11-16, branch `fix/upm-meta-files`)
+
+**What was wrong.** An install by Git URL of `release/unity-bearer-xp` (`d4f4c09`) resolved the commit but compiled nothing. The package shipped no `.meta` files, and Unity ignores every asset without one in an immutable (git) package. The legacy `Jiwe/` folder also had no asmdef, so outside `Assets/` its scripts belonged to no assembly. Found by the JiweTimeTrial verification on 2026-11-14.
+
+**Fix.** `.meta` files for every shipped file and folder (58, generated by Unity 2022.3.30f1 from an embedded copy; `Tests~` is skipped by Unity and has none; no duplicate GUIDs). New `Jiwe/Jiwe.Legacy.asmdef` (assembly `Jiwe.Legacy`, root namespace `Jiwe`, auto-referenced, no references). `JiweStorage.jslib.meta` keeps the plugin WebGL-only. `Tests~/run-tests.sh` now compiles the tests against the shipped asmdef instead of writing its own.
+
+Environment: macOS, Unity **2022.3.30f1** (`70558241b701`), batch mode.
+
+| Check | Result |
+|---|---|
+| Fresh project, manifest `"com.jiwe.wallet-sdk": "file:<branch checkout>"` | `Library/ScriptAssemblies` has `Jiwe.Core.dll`, `Jiwe.Runtime.dll`, `Jiwe.Legacy.dll`. **0** "has no meta file" lines, no `error CS`. Unity wrote no new files into the checkout |
+| Fresh project, manifest `"git+file://…/wallet-sdk-unity/.git#fix/upm-meta-files"` (lock file: `source: git`, the immutable path a GitHub URL takes) | Same three assemblies. **0** "has no meta file" lines, no `error CS` |
+| A consumer script in `Assets/` using `typeof(Jiwe.JiweAuth)`, `typeof(Jiwe.JiweWallet)` and `typeof(JiweSdk)` | Compiles. The legacy assembly does not collide with `Jiwe.Core`, `Jiwe.Runtime` or the global `JiweSdk` |
+| `Samples/Quickstart/QuickstartSample.cs` placed under `Assets/Samples/…` as a Package Manager sample import would | Compiles into `Assembly-CSharp` |
+| `UNITY=…/2022.3.30f1/… PROJECT=<scratch> ./Tests~/run-tests.sh` | WebGL plugin (node) **8/8**. Unity PlayMode **101 passed, 0 failed, 1 skipped** of 102. The skip is `LiveSmokeTests.Live_ReadOnly_Smoke` (needs live credentials). The script exits 1 because its summary counts the skip as not passed |
+
+**Known noise, not fixed here.** Every install logs *"Script 'Packages/com.jiwe.wallet-sdk/Samples/…' will not be compiled because it exists outside the Assets folder"* for the 10 sample scripts. The samples live in `Samples/` rather than the conventional `Samples~/`, so Unity imports them as package assets. Harmless, but a release should move them.
+
+**Still not covered by G1/G2:** Unity 6, Windows, any player build (including WebGL), and the Package Manager **Import** button for the sample (the file was placed by hand).
+
 ## 8. Remaining release blockers
 
-1. **G1 is open.** The package is not verified as a Unity package until it has been imported and compiled in the Editor. Every claim about the Unity layer rests on the stub compile, which is weaker.
+1. **G1 and G2 are closed for Unity 2022.3.30f1 on macOS only** (section 7.1). Unity 6, Windows and player builds have not been compiled.
 2. **G3 and G4 are open.** No provisioned client exists, so no authenticated journey has run in production. Nothing in this release is production-authenticated.
 3. **Platform support is unproven.** Windows and macOS are the intended targets; neither has been run.
 4. **Cowrie is excluded.** There is no verified public-client Cowrie contract. The OIDC route returns only `points` and `XP`, and the Abacus GraphQL balance is unverified for third parties. The precise blocker is: *the permitted public scope set has no Cowrie read; a Cowrie read needs a new, verified Abacus contract and a scope decision from Jiwe.*
@@ -137,7 +157,7 @@ An independent subagent reviewed the code and documents with instructions to bre
 
 **Human review of the branch: yes, now.** The code, the core tests and the documentation are ready to read, challenge and change.
 
-**Limited pilot: no.** Blocked by G1 through G6 and G9.
+**Limited pilot: no.** Blocked by G3 through G6 and G9.
 
 **Public release: no.** Blocked by every gate above, and by the legacy credential decisions in G8.
 

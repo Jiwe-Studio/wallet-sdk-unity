@@ -31,7 +31,7 @@ mkdir -p "$A/Editor"
 cp -R "${SDK_DIR:-$REPO/Jiwe}" "$A/Jiwe"
 # The package ships Jiwe/Jiwe.Legacy.asmdef; tests compile against that. Older SDK_DIR copies without one get it added.
 ls "$A/Jiwe"/*.asmdef >/dev/null 2>&1 || echo '{ "name": "Jiwe.Legacy", "rootNamespace": "Jiwe" }' > "$A/Jiwe/Jiwe.Legacy.asmdef"
-SAMPLES_ROOT="${SAMPLES_ROOT:-$REPO/Samples}"
+SAMPLES_ROOT="${SAMPLES_ROOT:-$REPO/Samples~}"
 if [ -d "$SAMPLES_ROOT/Unity" ]; then
   cp -R "$SAMPLES_ROOT/Unity" "$A/JiweSamples"
   echo '{ "name": "JiweSamples", "references": ["Jiwe.Legacy"] }' > "$A/JiweSamples/JiweSamples.asmdef"
@@ -77,7 +77,7 @@ MOCK=$!
 trap 'kill $MOCK ${NODE_PID:-} 2>/dev/null || true' EXIT
 for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$JIWE_MOCK_PORT/__health" >/dev/null && break; sleep 0.2; done
 
-# The server-in-front-of-Jiwe sample (Samples/server-node), pointed at the mock, so the Unity tests can exercise it for real.
+# The server-in-front-of-Jiwe sample (Samples~/server-node), pointed at the mock, so the Unity tests can exercise it for real.
 if command -v node >/dev/null && [ -f "$SAMPLES_ROOT/server-node/server.mjs" ]; then
   export JIWE_NODE_PORT="${JIWE_NODE_PORT:-8766}"
   echo "== starting the Node sample server on :$JIWE_NODE_PORT"

@@ -25,7 +25,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
   A="$PROJECT/Assets"
   rm -rf "$A/Jiwe" "$A/JiweSamples" "$A/E2E" "$A/Editor/WebGlE2EBuild.cs"
   mkdir -p "$A/E2E" "$A/Editor"
-  cp -R "${SDK_DIR:-$REPO/Jiwe}" "$A/Jiwe"; cp -R "$REPO/Samples/Unity" "$A/JiweSamples"
+  cp -R "${SDK_DIR:-$REPO/Jiwe}" "$A/Jiwe"; cp -R "$REPO/Samples~/Unity" "$A/JiweSamples"
   cp "$HERE/WebGlE2E.cs" "$A/E2E/"; cp "$HERE/WebGlE2EBuild.cs" "$A/Editor/"
   cat > "$PROJECT/Packages/manifest.json" <<'JSON'
 { "dependencies": { "com.unity.modules.imgui": "1.0.0", "com.unity.modules.jsonserialize": "1.0.0", "com.unity.modules.unitywebrequest": "1.0.0" } }

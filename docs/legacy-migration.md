@@ -20,7 +20,7 @@ The SDK does not promote any legacy financial or administrative operation into t
 
 ## 2. What is preserved
 
-- **Code against the `origin/main` baseline (`9fb721f`):** `Jiwe/JiweAuth.cs` and the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib` are byte-identical. `Jiwe/JiweWallet.cs` differs by one added doc comment. The legacy samples `Samples/Unity/JiweBootstrap.cs`, `JiweCredentialsConfig.cs` and `XpAndLeaderboardSample.cs` differ only in doc comments. No executable line changed. Checked with `git diff origin/main -- 'Jiwe/*.cs' 'Jiwe/*.jslib' 'Samples/*'`.
+- **Code against the `origin/main` baseline (`9fb721f`):** `Jiwe/JiweAuth.cs` and the WebGL `Jiwe/Plugins/WebGL/JiweStorage.jslib` are byte-identical. `Jiwe/JiweWallet.cs` differs by one added doc comment. The legacy samples `Samples~/Unity/JiweBootstrap.cs` (moved from `Samples/`), `JiweCredentialsConfig.cs` and `XpAndLeaderboardSample.cs` differ only in doc comments. No executable line changed. Checked with `git diff -M origin/main -- 'Jiwe/*.cs' 'Jiwe/*.jslib' 'Samples/*' 'Samples~/*'`.
 - **Packaging additions, not code changes:** `Jiwe/Jiwe.Legacy.asmdef` and `.meta` files for every shipped file.
 
 ### "Keeps working" depends on how the SDK is installed
@@ -80,7 +80,7 @@ The legacy setup puts credentials **inside the game build**:
 
 - `JiweWallet.apiKey` and `apiUsername`, set in the Inspector (`Jiwe/JiweWallet.cs`).
 - `JiweAuth.apiSecret`, which is also sent as an OAuth **client secret** in the legacy token request (`Jiwe/JiweAuth.cs`).
-- `Samples/Unity/JiweCredentialsConfig.cs`, which shows the same pattern.
+- `Samples~/Unity/JiweCredentialsConfig.cs`, which shows the same pattern.
 
 Anyone with the binary can extract these. The review found that the key gates app-wide metadata writes and financial operations, subject to the app's configured limits, which were not verified. **No leak or exploitation was observed.** This is a risk assessment from source, not from an incident.
 
@@ -120,7 +120,7 @@ Each phase lists prerequisites, SDK and backend changes, developer actions, comp
 | | |
 |---|---|
 | **Prerequisites** | Client registered per game through the public-native contract (see [authentication.md](authentication.md#2-client-model)). Platform verification done (see [release-verification.md](release-verification.md)) |
-| **SDK changes** | This release: `Runtime/` and `Samples/Quickstart/`. Legacy untouched |
+| **SDK changes** | This release: `Runtime/` and `Samples~/Quickstart/`. Legacy untouched |
 | **Hermes / Abacus changes** | Provisioning of public native clients through the existing `db.js` contract. Verifying `rewards:read` on a test client |
 | **Developer actions** | New games use `JiweSdk.InitializeAsync` / `JiweSdk.Auth` / `JiweSdk.Rewards`. Existing games need no change |
 | **Compatibility** | All legacy members remain |

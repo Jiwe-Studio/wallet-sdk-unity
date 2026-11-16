@@ -1,5 +1,5 @@
 // Minimal stand-ins for the UnityEngine members the SDK and its sample call. Dev-only: used to
-// compile-check Runtime/ and Samples/ without the Unity Editor. Not a substitute for an Editor build.
+// compile-check Runtime/ and Samples~/ without the Unity Editor. Not a substitute for an Editor build.
 using System;
 
 namespace UnityEngine

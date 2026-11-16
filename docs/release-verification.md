@@ -29,7 +29,7 @@ Environment: macOS (darwin 27.2), Homebrew .NET SDK 11.0.100 (runtime 11.0.0), N
 | `dotnet run --project "Tests~/CoreTests"` | **75 passed, 0 failed.** Covers PKCE (RFC 7636 vector), config and redirect validation, authorize and token request shape, callback validation, token parsing, ID-token RS256 verification (valid, tampered, `alg none`, HS256 downgrade, unknown kid, wrong issuer, audience, `azp`, expiry, `nbf`, nonce, subject, oversize), live-shaped JWKS, XP parsing (missing field, string, negative, extra fields), HTTP status mapping, session generation and account-switch rules, and four real-`HttpListener` loopback tests (delivery and 404, timeout frees the port, cancellation frees the port, busy port) |
 | `dotnet build "Tests~/UnityCompileCheck"` | **Build succeeded**, against UnityEngine **stubs**. Shows the Unity layer and the sample compile against the members they call. This is **not** an Editor compile |
 | `Tests~/compat/snapshot-legacy-api.sh` | **All 112 golden members present.** This is a regression guard generated from the same baseline, not an independent oracle |
-| `git diff origin/main -- Jiwe/ Samples/` | **Empty.** Legacy code unchanged |
+| `git diff origin/main -- Jiwe/ Samples/` | Empty at the time of this record. Since `d4f4c09`, doc comments only, plus packaging files (asmdef, `.meta`) from `fix/upm-meta-files`. No executable legacy line changed |
 | `curl https://id.jiwe.io/.well-known/openid-configuration` (anonymous) | HTTP 200. S256 supported; `token_endpoint_auth_methods_supported` includes `none`; `refresh_token`, `end_session_endpoint` and `revocation_endpoint` advertised |
 | `curl https://id.jiwe.io/jwks` (anonymous) | HTTP 200. One RSA key, `use: sig`, no `alg` field, 2048-bit modulus. The SDK's parser accepts this shape (regression test added) |
 | `curl https://abacus.jiwe.io/rest/api/v1/oidc/rewards/earned` (anonymous) | HTTP 401 `"A Bearer access token is required"`. Consistent with the bearer contract |
@@ -61,7 +61,7 @@ The mission asks for coverage of the new path and the legacy path. This table sh
 | Unity object lifecycle | **Not covered by any runnable test.** `JiweSdk.Shutdown` and the sample's `OnDestroy` are reviewed but not exercised |
 | Legacy configuration loads | **Not run** (needs the Unity Editor) |
 | Legacy public methods callable | **Not run** (needs the Unity Editor). The API snapshot shows the signatures are present |
-| Legacy headers unchanged | Verified by source identity (`git diff` is empty) |
+| Legacy headers unchanged | Verified by source identity: no executable legacy line differs from `origin/main` |
 | Modern and legacy coexist | **Not run** |
 
 ## 4. Contract verification

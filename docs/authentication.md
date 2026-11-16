@@ -13,7 +13,7 @@ The SDK may contact exactly two services. Their endpoints are constants in `Runt
 | Service | Endpoints | Used for |
 |---|---|---|
 | Hermes (`https://id.jiwe.io`) | `/auth`, `/token`, `/jwks` | Sign-in, token exchange, ID-token signing keys |
-| Abacus (`https://abacus.jiwe.io/rest/api/v1`) | `/oidc/rewards/earned` | Earned XP (the SDK reads only the `XP` field) |
+| Abacus (`https://abacus.jiwe.io/rest/api/v1`) | `/oidc/rewards/earned`, `/oidc/rewards/xp`, `/oidc/leaderboard` | Earned XP (the SDK reads only the `XP` field), XP awards, the XP leaderboard |
 
 Nothing else is contacted: not Mercatus, `commerce.jiwe.io`, `pay.jiwe.io`, Hasura or Sidekick.
 
@@ -69,7 +69,7 @@ The browser returns to `http://127.0.0.1:<port>/callback`. `JiweAuthorization.Va
 1. **Address.** Scheme, host, port and path must equal the registered redirect URI. The SDK rebuilds the callback from the registered URI plus the received query, so a spoofed `Host` header cannot change it.
 2. **State.** Must equal this attempt's state, compared in constant time. A mismatch is reported as `LoginSuperseded`, and an error parameter on that callback is not trusted.
 3. **Error.** `access_denied` is a cancellation. Any other error is a failure. Only the error code is reported, not the description.
-4. **Issuer (RFC 9207).** `iss` must equal `https://id.jiwe.io`. Hermes advertises `authorization_response_iss_parameter_supported`, so a missing or wrong issuer is rejected.
+4. **Issuer (RFC 9207).** `iss` must equal `https://id.jiwe.io`. Hermes advertises `authorization_response_iss_parameter_supported`, so a missing or wrong issuer is rejected. **Verified live on 2026-11-14:** a production sign-in through the loopback redirect succeeded, so Hermes does send `iss` on the callback (release gate G4's open question).
 5. **Code.** Must be present and non-empty.
 
 Duplicate query parameters are rejected rather than resolved. The first value is never silently preferred.
@@ -81,9 +81,20 @@ Hermes returns two tokens. They have different jobs and the SDK never interchang
 | Token | Audience | Used for | How it is trusted |
 |---|---|---|---|
 | **ID token** (`id_token`) | the client ID | Identifying the player (`sub`) | Verified against the JWKS before any claim is read |
-| **Access token** | `https://api.jiwe.io` (Abacus) | Bearer for `/oidc/rewards/earned` | Accepted only from the token response; checked for `Bearer` type and lifetime |
+| **Access token** | `https://api.jiwe.io` (Abacus) | Bearer for the `/oidc/*` Abacus routes | Accepted only from the token response; checked for `Bearer` type and lifetime |
 
 The SDK never uses the ID token as an API bearer, and never sends the access token to Hermes.
+
+### Known gap: no ID token for API-key routes
+
+`SignInAsync` verifies the ID token and then **discards it**. The session keeps only the `sub` and the access token, and the public surface exposes only `PlayerId`. A game therefore cannot obtain the player's ID token from the SDK.
+
+Some Abacus routes need exactly that token. They authenticate the app with an API key and identify the player with `X-API-TOKEN` set to the player's Hermes **ID token** (with `aud` set to the app's linked client). Examples:
+
+- the performance-score leaderboards, such as lap times with `LOWEST_BEST` (`POST /leaderboard/scores`, Abacus contract at `abacus@eedd694`);
+- the legacy rewards routes.
+
+So these routes cannot be driven from a game using this SDK alone. A test in the 2026-11-14 Unity verification confirmed that the SDK provides no ID token. The routes' token requirement comes from the Abacus contract; no live call to them was made. Closing the gap needs one of two things: an ID-token accessor added to the SDK, or a trusted game server that holds the API key and receives the player's identity some other way. The API key must never ship in the game either way.
 
 ### ID-token verification (`JiweIdTokenValidator`)
 
@@ -158,7 +169,7 @@ Sign-in times out after **5 minutes** with a `Timeout` error.
 
 ## 10. Application pause and resume
 
-On Standalone desktop the browser runs outside the game, so no special handling is needed for pause. The 5-minute timeout bounds how long a sign-in can wait. **This behaviour is unverified on a real device**, because no Unity Editor run was possible for this release.
+On Standalone desktop the browser runs outside the game, so no special handling is needed for pause. The 5-minute timeout bounds how long a sign-in can wait. **This behaviour is unverified in a player build.** Sign-in has run only in the macOS Editor (section 11).
 
 Android and iOS redirects are not supported, so no deep-link lifecycle is handled.
 
@@ -167,8 +178,8 @@ Android and iOS redirects are not supported, so no deep-link lifecycle is handle
 | Platform | Redirect mechanism | Status |
 |---|---|---|
 | Windows standalone | Loopback `http://127.0.0.1:<port>/callback` | Code written; **not verified** |
-| macOS standalone | Loopback `http://127.0.0.1:<port>/callback` | Code written; **not verified** |
-| Unity Editor | Loopback | Code written; **not verified** |
+| macOS standalone | Loopback `http://127.0.0.1:<port>/callback` | Code written; **not verified** in a player build |
+| Unity Editor | Loopback | **Verified on macOS, Unity 2022.3.30f1, 2026-11-14:** production sign-in through `http://127.0.0.1:51772/callback`, ID token verified, sign-out clears the session. Windows Editor not verified |
 | Android, iOS | Custom scheme | **Unsupported**; rejected by `JiweConfig` |
 | WebGL | Same-tab redirect | **Unsupported** |
 

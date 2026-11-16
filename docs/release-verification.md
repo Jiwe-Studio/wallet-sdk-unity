@@ -138,9 +138,12 @@ Environment: macOS, Unity **2022.3.30f1** (`70558241b701`), batch mode.
 | `Samples/Quickstart/QuickstartSample.cs` placed under `Assets/Samples/…` as a Package Manager sample import would | Compiles into `Assembly-CSharp` |
 | `UNITY=…/2022.3.30f1/… PROJECT=<scratch> ./Tests~/run-tests.sh` | WebGL plugin (node) **8/8**. Unity PlayMode **101 passed, 0 failed, 1 skipped** of 102. The skip is `LiveSmokeTests.Live_ReadOnly_Smoke` (needs live credentials). The script exits 1 because its summary counts the skip as not passed |
 
-**Known noise, not fixed here.** Every install logs *"Script 'Packages/com.jiwe.wallet-sdk/Samples/…' will not be compiled because it exists outside the Assets folder"* for the 10 sample scripts. The samples live in `Samples/` rather than the conventional `Samples~/`, so Unity imports them as package assets. Harmless, but a release should move them.
+**Sample warnings, fixed on `fix/samples-tilde`.** At `fix/upm-meta-files` every install logged *"Script 'Packages/com.jiwe.wallet-sdk/Samples/…' will not be compiled because it exists outside the Assets folder"* for the 10 sample scripts. The samples now live in `Samples~/`. Re-checked on 2026-11-16 with a `git+file://…#fix/samples-tilde` install in a fresh 2022.3.30f1 project:
+- **0** "will not be compiled", "has no meta file" or `error CS` lines.
+- `Sample.FindByPackage` lists only **Quickstart** (from `Samples~/Quickstart`). `Sample.Import()` copies it to `Assets/Samples/Jiwe Wallet SDK/2.0.0-rc.1/Quickstart/`, where it compiles.
+- `run-tests.sh` (samples from `Samples~/`): **101 passed, 0 failed, 1 skipped**. WebGL plugin 8/8.
 
-**Still not covered by G1/G2:** Unity 6, Windows, any player build (including WebGL), and the Package Manager **Import** button for the sample (the file was placed by hand).
+**Still not covered by G1/G2:** Unity 6, Windows, and any player build (including WebGL). The sample import was exercised through the Package Manager API, not by clicking the **Import** button.
 
 ## 8. Remaining release blockers
 
